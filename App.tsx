@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, useNavigate, useLocation, useSearchParams, useParams } from 'react-router-dom';
 import { Navbar } from './components/Navbar';
 import { Hero } from './components/Hero';
 import { FilterBar } from './components/FilterBar';
@@ -132,24 +133,29 @@ const mockProperties: Property[] = [
 
 const MainContent: React.FC = () => {
   const [isDark, setIsDark] = useState(false);
-  const [view, setView] = useState<ViewState>('marketplace');
-  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { dict } = useLanguage();
 
   const itemsPerPage = 3;
   const totalPages = Math.ceil(mockProperties.length / itemsPerPage);
 
+  // Get current page from URL search params, default to 1
+  const currentPage = parseInt(searchParams.get('page') || '1', 10);
+
   const handleNextPage = () => {
-    setCurrentPage(prev => Math.min(prev + 1, totalPages));
+    const nextPage = Math.min(currentPage + 1, totalPages);
+    setSearchParams({ page: nextPage.toString() });
   };
 
   const handlePrevPage = () => {
-    setCurrentPage(prev => Math.max(prev - 1, 1));
+    const prevPage = Math.max(currentPage - 1, 1);
+    setSearchParams({ page: prevPage.toString() });
   };
 
   const handlePageSelect = (page: number) => {
-    setCurrentPage(page);
+    setSearchParams({ page: page.toString() });
   };
 
   const displayedProperties = mockProperties.slice(
@@ -179,140 +185,161 @@ const MainContent: React.FC = () => {
 
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [view]);
+  }, [location.pathname]);
 
   const handleNavigate = (newView: ViewState) => {
-    setView(newView);
-  };
-
-  const handlePropertySelect = (property: Property) => {
-    setSelectedProperty(property);
-    setView('property-details');
-  };
-
-  // If dashboard is requested, we pass control to the Dashboard component
-  if (view === 'dashboard') {
-    return <Dashboard onNavigate={handleNavigate} />;
-  }
-  
-  // If auth pages are requested
-  if (view === 'login') {
-    return <Login onNavigate={handleNavigate} />;
-  }
-
-  if (view === 'signup') {
-    return <Signup onNavigate={handleNavigate} />;
-  }
-
-  const renderContent = () => {
-    switch (view) {
-      case 'property-details':
-        return selectedProperty ? (
-          <PropertyDetails property={selectedProperty} onNavigate={handleNavigate} />
-        ) : (
-          <div className="min-h-screen flex items-center justify-center">Loading...</div>
-        );
-      case 'how-it-works':
-        return <HowItWorks />;
-      case 'resources':
-        return <Resources />;
-      case 'about':
-        return <About />;
-      case 'contact':
-        return <Contact />;
-      case 'privacy':
-        return <Privacy />;
-      case 'marketplace':
-      default:
-        return (
-          <>
-            <Hero />
-            <FilterBar />
-
-            {/* Featured Properties Section */}
-            <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-              <div className="flex flex-col md:flex-row justify-between items-end mb-12 gap-4">
-                <div>
-                  <h2 className="text-3xl font-extrabold text-charcoal dark:text-white mb-2 font-display">
-                    {dict.sections.featured}
-                  </h2>
-                  <p className="text-gray-500 dark:text-gray-400">
-                    {dict.sections.featuredSub}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={handlePrevPage}
-                    disabled={currentPage === 1}
-                    className="p-2 rounded-full border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-charcoal dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="material-icons-round">chevron_left</span>
-                  </button>
-                  <button 
-                    onClick={handleNextPage}
-                    disabled={currentPage === totalPages}
-                    className="p-2 rounded-full border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-charcoal dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="material-icons-round">chevron_right</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                {displayedProperties.map((prop) => (
-                  <PropertyCard key={prop.id} property={prop} onSelect={handlePropertySelect} />
-                ))}
-              </div>
-
-              {/* Pagination */}
-              <div className="mt-16 flex justify-center">
-                <nav className="flex items-center gap-1">
-                  <button 
-                    onClick={handlePrevPage}
-                    disabled={currentPage === 1}
-                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="material-icons-round">keyboard_arrow_left</span>
-                  </button>
-                  
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                    <button 
-                      key={page}
-                      onClick={() => handlePageSelect(page)}
-                      className={`w-10 h-10 rounded-lg font-bold transition-colors ${
-                        currentPage === page 
-                          ? 'bg-primary text-white shadow-md shadow-primary/20' 
-                          : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300'
-                      }`}
-                    >
-                      {page}
-                    </button>
-                  ))}
-                  
-                  <button 
-                    onClick={handleNextPage}
-                    disabled={currentPage === totalPages}
-                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="material-icons-round">keyboard_arrow_right</span>
-                  </button>
-                </nav>
-              </div>
-            </section>
-          </>
-        );
+    if (newView === 'marketplace') {
+      navigate('/');
+    } else if (newView === 'dashboard') {
+      navigate('/dashboard');
+    } else if (newView === 'login') {
+      navigate('/login');
+    } else if (newView === 'signup') {
+      navigate('/signup');
+    } else if (newView === 'how-it-works') {
+      navigate('/how-it-works');
+    } else if (newView === 'resources') {
+      navigate('/resources');
+    } else if (newView === 'about') {
+      navigate('/about');
+    } else if (newView === 'contact') {
+      navigate('/contact');
+    } else if (newView === 'privacy') {
+      navigate('/privacy');
     }
   };
 
-  const isAuxiliaryPage = ['how-it-works', 'resources', 'about', 'contact', 'privacy', 'login', 'signup'].includes(view);
+  const handlePropertySelect = (property: Property) => {
+    navigate(`/property/${property.id}`);
+  };
+
+  // Marketplace component with pagination
+  const Marketplace: React.FC = () => (
+    <>
+      <Hero />
+      <FilterBar />
+
+      {/* Featured Properties Section */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+        <div className="flex flex-col md:flex-row justify-between items-end mb-12 gap-4">
+          <div>
+            <h2 className="text-3xl font-extrabold text-charcoal dark:text-white mb-2 font-display">
+              {dict.sections.featured}
+            </h2>
+            <p className="text-gray-500 dark:text-gray-400">
+              {dict.sections.featuredSub}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handlePrevPage}
+              disabled={currentPage === 1}
+              className="p-2 rounded-full border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-charcoal dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span className="material-icons-round">chevron_left</span>
+            </button>
+            <button
+              onClick={handleNextPage}
+              disabled={currentPage === totalPages}
+              className="p-2 rounded-full border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-charcoal dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span className="material-icons-round">chevron_right</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {displayedProperties.map((prop) => (
+            <PropertyCard key={prop.id} property={prop} onSelect={handlePropertySelect} />
+          ))}
+        </div>
+
+        {/* Pagination */}
+        <div className="mt-16 flex justify-center">
+          <nav className="flex items-center gap-1">
+            <button
+              onClick={handlePrevPage}
+              disabled={currentPage === 1}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span className="material-icons-round">keyboard_arrow_left</span>
+            </button>
+
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+              <button
+                key={page}
+                onClick={() => handlePageSelect(page)}
+                className={`w-10 h-10 rounded-lg font-bold transition-colors ${
+                  currentPage === page
+                    ? 'bg-primary text-white shadow-md shadow-primary/20'
+                    : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300'
+                }`}
+              >
+                {page}
+              </button>
+            ))}
+
+            <button
+              onClick={handleNextPage}
+              disabled={currentPage === totalPages}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span className="material-icons-round">keyboard_arrow_right</span>
+            </button>
+          </nav>
+        </div>
+      </section>
+    </>
+  );
+
+  // Property Details component
+  const PropertyDetailPage: React.FC = () => {
+    const { id } = useParams<{ id: string }>();
+    const property = mockProperties.find(p => p.id === parseInt(id || '0', 10));
+    return property ? (
+      <PropertyDetails property={property} onNavigate={handleNavigate} />
+    ) : (
+      <div className="min-h-screen flex items-center justify-center">Property not found</div>
+    );
+  };
+
+  // Helper function to determine current view for navbar
+  const getCurrentView = (): ViewState => {
+    const path = location.pathname;
+    if (path === '/') return 'marketplace';
+    if (path === '/dashboard') return 'dashboard';
+    if (path === '/login') return 'login';
+    if (path === '/signup') return 'signup';
+    if (path.startsWith('/property/')) return 'property-details';
+    if (path === '/how-it-works') return 'how-it-works';
+    if (path === '/resources') return 'resources';
+    if (path === '/about') return 'about';
+    if (path === '/contact') return 'contact';
+    if (path === '/privacy') return 'privacy';
+    return 'marketplace';
+  };
+
+  const currentView = getCurrentView();
+  const isAuxiliaryPage = ['how-it-works', 'resources', 'about', 'contact', 'privacy', 'login', 'signup'].includes(currentView);
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Navbar onNavigate={handleNavigate} currentView={view} />
-      
+      <Navbar onNavigate={handleNavigate} currentView={currentView} />
+
       <main className="flex-grow">
-        {renderContent()}
-        {view !== 'property-details' && !isAuxiliaryPage && <StatsSection />}
+        <Routes>
+          <Route path="/" element={<Marketplace />} />
+          <Route path="/dashboard" element={<Dashboard onNavigate={handleNavigate} />} />
+          <Route path="/login" element={<Login onNavigate={handleNavigate} />} />
+          <Route path="/signup" element={<Signup onNavigate={handleNavigate} />} />
+          <Route path="/property/:id" element={<PropertyDetailPage />} />
+          <Route path="/how-it-works" element={<HowItWorks />} />
+          <Route path="/resources" element={<Resources />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/contact" element={<Contact />} />
+          <Route path="/privacy" element={<Privacy />} />
+        </Routes>
+        {currentView !== 'property-details' && !isAuxiliaryPage && <StatsSection />}
       </main>
 
       {!isAuxiliaryPage && <Footer onNavigate={handleNavigate} />}
@@ -333,11 +360,13 @@ const MainContent: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <AuthProvider>
-      <LanguageProvider>
-        <MainContent />
-      </LanguageProvider>
-    </AuthProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <LanguageProvider>
+          <MainContent />
+        </LanguageProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 };
 

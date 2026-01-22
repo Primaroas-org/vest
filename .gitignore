@@ -29,6 +29,10 @@ dist-ssr
 *.sln
 *.sw?
 
+# pnpm
+.pnpm/
+.pnpm-store/
+
 # Backend build
 dist/
 
