@@ -417,7 +417,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                             {activeTab === 'transactions' && dict.nav.transactions}
                             {activeTab === 'settings' && dict.nav.settings}
                         </h2>
-                        <p className="text-gray-600 dark:text-gray-400 mt-2 font-medium">{dict.dashboard.wealthDashboard} • 2024</p>
+                        <p className="text-gray-600 dark:text-gray-400 mt-2 font-medium">{dict.dashboard.wealthDashboard} • 2026</p>
                     </div>
                     <div className="flex items-center gap-6">
                         <div className="flex gap-2">

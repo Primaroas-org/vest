@@ -12,6 +12,8 @@ export interface Property {
   minInvest: string;
   isFavorite: boolean;
   description?: string;
+  latitude?: string | number;
+  longitude?: string | number;
   financials?: {
     totalValue: string;
     sharePrice: string;
@@ -50,4 +52,6 @@ export type ViewState =
   | 'contact' 
   | 'privacy'
   | 'login'
-  | 'signup';
+  | 'signup'
+  | 'forgot-password'
+  | 'check-email';

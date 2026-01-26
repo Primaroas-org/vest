@@ -9,7 +9,7 @@ import { Footer } from './components/Footer';
 import { Dashboard } from './components/Dashboard';
 import { PropertyDetails } from './components/PropertyDetails';
 import { HowItWorks, Resources, About, Contact, Privacy } from './components/Pages';
-import { Login, Signup } from './components/AuthPages';
+import { Login, Signup, ForgotPassword, CheckEmail } from './components/AuthPages';
 import { Property, ViewState, PropertyStatus } from './types';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -92,6 +92,8 @@ const MainContent: React.FC = () => {
               minInvest: `₮ ${parseFloat(prop.price_per_share || '0').toLocaleString()}`,
               isFavorite: false,
               description: prop.description || '',
+              latitude: prop.latitude,
+              longitude: prop.longitude,
               financials: {
                 totalValue: `₮ ${parseFloat(prop.total_valuation || '0').toLocaleString()}`,
                 sharePrice: `₮ ${parseFloat(prop.price_per_share || '0').toLocaleString()}`,
@@ -173,6 +175,10 @@ const MainContent: React.FC = () => {
       navigate('/login');
     } else if (newView === 'signup') {
       navigate('/signup');
+    } else if (newView === 'forgot-password') {
+      navigate('/forgot-password');
+    } else if (newView === 'check-email') {
+      navigate('/check-email');
     } else if (newView === 'how-it-works') {
       navigate('/how-it-works');
     } else if (newView === 'resources') {
@@ -329,6 +335,8 @@ const MainContent: React.FC = () => {
     if (path === '/dashboard') return 'dashboard';
     if (path === '/login') return 'login';
     if (path === '/signup') return 'signup';
+    if (path === '/forgot-password') return 'forgot-password';
+    if (path === '/check-email') return 'check-email';
     if (path.startsWith('/property/')) return 'property-details';
     if (path === '/how-it-works') return 'how-it-works';
     if (path === '/resources') return 'resources';
@@ -339,7 +347,7 @@ const MainContent: React.FC = () => {
   };
 
   const currentView = getCurrentView();
-  const isAuxiliaryPage = ['how-it-works', 'resources', 'about', 'contact', 'privacy', 'login', 'signup'].includes(currentView);
+  const isAuxiliaryPage = ['how-it-works', 'resources', 'about', 'contact', 'privacy', 'login', 'signup', 'forgot-password', 'check-email'].includes(currentView);
   const isDashboard = location.pathname.startsWith('/dashboard');
   const shouldShowNavbar = !(user && isDashboard);
 
@@ -353,6 +361,8 @@ const MainContent: React.FC = () => {
           <Route path="/dashboard/*" element={<Dashboard onNavigate={handleNavigate} />} />
           <Route path="/login" element={<Login onNavigate={handleNavigate} />} />
           <Route path="/signup" element={<Signup onNavigate={handleNavigate} />} />
+          <Route path="/forgot-password" element={<ForgotPassword onNavigate={handleNavigate} />} />
+          <Route path="/check-email" element={<CheckEmail onNavigate={handleNavigate} />} />
           <Route path="/property/:id" element={<PropertyDetailPage />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
           <Route path="/resources" element={<Resources />} />
