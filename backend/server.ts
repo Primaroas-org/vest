@@ -15,6 +15,7 @@ import { authenticate, requireKYC, requireAdmin } from './middleware/auth.js';
 import { invest } from './controllers/investment.controller.js';
 import { getPortfolio } from './controllers/portfolio.controller.js';
 import { distributeRent } from './controllers/admin.controller.js';
+import { submitKYC } from './controllers/kyc.controller.js';
 import {
     getDashboardStats,
     getAssets,
@@ -198,6 +199,13 @@ app.get('/api/user/transactions', authenticate, async (req: Request, res: Respon
         } as ErrorResponse);
     }
 });
+
+// =====================================================
+// KYC ROUTES (Require Authentication)
+// =====================================================
+
+// Submit KYC documents
+app.post('/api/kyc/submit', authenticate, submitKYC);
 
 // =====================================================
 // INVESTMENT ROUTES (Require KYC)

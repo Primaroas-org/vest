@@ -51,6 +51,8 @@ export type ViewState =
   | 'about' 
   | 'contact' 
   | 'privacy'
+  | 'terms'
+  | 'kyc'
   | 'login'
   | 'signup'
   | 'forgot-password'

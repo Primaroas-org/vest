@@ -8,8 +8,9 @@ import { StatsSection } from './components/StatsSection';
 import { Footer } from './components/Footer';
 import { Dashboard } from './components/Dashboard';
 import { PropertyDetails } from './components/PropertyDetails';
-import { HowItWorks, Resources, About, Contact, Privacy } from './components/Pages';
+import { HowItWorks, Resources, About, Contact, Privacy, Terms } from './components/Pages';
 import { Login, Signup, ForgotPassword, CheckEmail } from './components/AuthPages';
+import { KYCEntry, KYCRDNumber, KYCDocumentUpload, KYCSelfie, KYCComplete } from './components/KYC';
 import { Property, ViewState, PropertyStatus } from './types';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -179,6 +180,8 @@ const MainContent: React.FC = () => {
       navigate('/forgot-password');
     } else if (newView === 'check-email') {
       navigate('/check-email');
+    } else if (newView === 'kyc') {
+      navigate('/kyc');
     } else if (newView === 'how-it-works') {
       navigate('/how-it-works');
     } else if (newView === 'resources') {
@@ -189,6 +192,8 @@ const MainContent: React.FC = () => {
       navigate('/contact');
     } else if (newView === 'privacy') {
       navigate('/privacy');
+    } else if (newView === 'terms') {
+      navigate('/terms');
     }
   };
 
@@ -337,17 +342,19 @@ const MainContent: React.FC = () => {
     if (path === '/signup') return 'signup';
     if (path === '/forgot-password') return 'forgot-password';
     if (path === '/check-email') return 'check-email';
+    if (path === '/kyc' || path.startsWith('/kyc/')) return 'kyc';
     if (path.startsWith('/property/')) return 'property-details';
     if (path === '/how-it-works') return 'how-it-works';
     if (path === '/resources') return 'resources';
     if (path === '/about') return 'about';
     if (path === '/contact') return 'contact';
     if (path === '/privacy') return 'privacy';
+    if (path === '/terms') return 'terms';
     return 'marketplace';
   };
 
   const currentView = getCurrentView();
-  const isAuxiliaryPage = ['how-it-works', 'resources', 'about', 'contact', 'privacy', 'login', 'signup', 'forgot-password', 'check-email'].includes(currentView);
+  const isAuxiliaryPage = ['how-it-works', 'resources', 'about', 'contact', 'privacy', 'terms', 'kyc', 'login', 'signup', 'forgot-password', 'check-email'].includes(currentView);
   const isDashboard = location.pathname.startsWith('/dashboard');
   const shouldShowNavbar = !(user && isDashboard);
 
@@ -363,12 +370,18 @@ const MainContent: React.FC = () => {
           <Route path="/signup" element={<Signup onNavigate={handleNavigate} />} />
           <Route path="/forgot-password" element={<ForgotPassword onNavigate={handleNavigate} />} />
           <Route path="/check-email" element={<CheckEmail onNavigate={handleNavigate} />} />
+          <Route path="/kyc" element={<KYCEntry onNavigate={handleNavigate} />} />
+          <Route path="/kyc/rd-number" element={<KYCRDNumber onNavigate={handleNavigate} />} />
+          <Route path="/kyc/verify" element={<KYCDocumentUpload onNavigate={handleNavigate} />} />
+          <Route path="/kyc/selfie" element={<KYCSelfie onNavigate={handleNavigate} />} />
+          <Route path="/kyc/complete" element={<KYCComplete onNavigate={handleNavigate} />} />
           <Route path="/property/:id" element={<PropertyDetailPage />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
           <Route path="/resources" element={<Resources />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/privacy" element={<Privacy />} />
+          <Route path="/terms" element={<Terms />} />
         </Routes>
         {currentView !== 'property-details' && !isAuxiliaryPage && <StatsSection />}
       </main>

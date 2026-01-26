@@ -464,10 +464,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                             </div>
                         </div>
                         <div className="h-10 w-px bg-gray-300 dark:bg-gray-600"></div>
+                        {!user.isVerified && (
+                            <button
+                                onClick={() => onNavigate('kyc')}
+                                className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-emerald-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 transition-all active:scale-95">
+                                <span className="material-icons-round text-base">verified_user</span>
+                                {dict.kyc.buttonText || 'KYC'}
+                            </button>
+                        )}
                         <div className="flex items-center gap-4">
                             <div className="text-right">
                                 <p className="text-sm font-bold text-gray-900 dark:text-white leading-tight">{user.name}</p>
-                                <p className="text-[11px] text-emerald-500 dark:text-emerald-400 font-bold uppercase tracking-wider">{user.isVerified ? dict.dashboard.kycVerified : 'Pending'}</p>
+                                <button
+                                    onClick={() => !user.isVerified && onNavigate('kyc')}
+                                    className={`text-[11px] font-bold uppercase tracking-wider transition-colors ${
+                                        user.isVerified 
+                                            ? 'text-emerald-500 dark:text-emerald-400 cursor-default' 
+                                            : 'text-emerald-500 dark:text-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-300 cursor-pointer underline'
+                                    }`}>
+                                    {user.isVerified ? dict.dashboard.kycVerified : 'Pending'}
+                                </button>
                             </div>
                             <div className="size-12 rounded-2xl bg-gray-300 dark:bg-gray-600 overflow-hidden border-2 border-white dark:border-gray-700 shadow-lg" style={{ backgroundImage: `url('${user.avatar}')`, backgroundSize: "cover" }}></div>
                         </div>

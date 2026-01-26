@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Property, ViewState } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
+import { Modal } from './Modal';
 
 interface PropertyDetailsProps {
   property: Property;
@@ -57,6 +58,7 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [showKYCModal, setShowKYCModal] = useState(false);
 
   // Extract price per share from financials or minInvest
   const getPricePerShare = (): number => {
@@ -114,7 +116,8 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
     }
 
     if (!user.isVerified) {
-      setError('KYC verification required. Please complete verification to invest.');
+      // Show KYC prompt modal
+      setShowKYCModal(true);
       return;
     }
 
@@ -382,9 +385,9 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
 
                 <button
                   onClick={handleInvest}
-                  disabled={loading || !isAuthenticated || !user?.isVerified}
+                  disabled={loading || !isAuthenticated}
                   className="w-full bg-primary hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/25 transition-all active:scale-95">
-                  {loading ? 'Processing...' : !isAuthenticated ? 'Login to Invest' : !user?.isVerified ? 'Complete KYC to Invest' : dict.details.investNow}
+                  {loading ? 'Processing...' : !isAuthenticated ? 'Login to Invest' : !user?.isVerified ? dict.kyc.completeKYCToInvest : dict.details.investNow}
                 </button>
                 <p className="text-xs text-center text-gray-400 mt-4">
                   *Returns are projected and not guaranteed.
@@ -395,6 +398,21 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
 
         </div>
       </div>
+
+      {/* KYC Prompt Modal */}
+      <Modal
+        isOpen={showKYCModal}
+        onClose={() => setShowKYCModal(false)}
+        onConfirm={() => {
+          setShowKYCModal(false);
+          onNavigate('kyc');
+        }}
+        title={dict.kyc.modalTitle || 'KYC Verification Required'}
+        message={dict.kyc.investPrompt || 'KYC verification is required to invest. Would you like to complete verification now?'}
+        confirmText={dict.kyc.modalConfirm || 'Complete KYC'}
+        cancelText={dict.kyc.modalCancel || 'Cancel'}
+        type="confirm"
+      />
     </div>
   );
 };

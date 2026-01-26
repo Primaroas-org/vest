@@ -46,6 +46,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               <button onClick={() => onNavigate('about')} className="text-left hover:text-primary transition-colors w-fit">{dict.nav.about}</button>
               <button onClick={() => onNavigate('contact')} className="text-left hover:text-primary transition-colors w-fit">{dict.footer.contact}</button>
               <button onClick={() => onNavigate('privacy')} className="text-left hover:text-primary transition-colors w-fit">{dict.footer.privacy}</button>
+              <button onClick={() => onNavigate('terms')} className="text-left hover:text-primary transition-colors w-fit">{dict.footer.terms}</button>
             </div>
           </div>
 
