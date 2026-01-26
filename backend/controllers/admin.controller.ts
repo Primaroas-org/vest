@@ -1,18 +1,12 @@
-import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
-import { MNT } from '../utils/numeric';
-import {
-    DistributeRentRequest,
-    DistributeRentResponse,
-    ErrorResponse,
-    Transaction
-} from '../types';
+import { supabase } from '../config/supabase.js';
+import { MNT } from '../utils/numeric.js';
+import type { DistributeRentRequest, DistributeRentResponse, ErrorResponse, Transaction } from '../types/index.js';
 
 /**
  * POST /admin/distribute-rent
  * Distributes rental income proportionally to all shareholders of a property
  */
-export async function distributeRent(req: Request, res: Response): Promise<void> {
+export async function distributeRent(req: any, res: any): Promise<void> {
     const { property_id, total_rent }: DistributeRentRequest = req.body;
 
     try {

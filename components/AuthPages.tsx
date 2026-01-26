@@ -10,11 +10,24 @@ interface AuthPageProps {
 export const Login: React.FC<AuthPageProps> = ({ onNavigate }) => {
   const { dict } = useLanguage();
   const { login } = useAuth();
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    login();
-    onNavigate('dashboard');
+    setError(null);
+    setLoading(true);
+
+    const result = await login(email, password);
+    
+    if (result.error) {
+      setError(result.error);
+      setLoading(false);
+    } else {
+      onNavigate('dashboard');
+    }
   };
 
   return (
@@ -34,6 +47,11 @@ export const Login: React.FC<AuthPageProps> = ({ onNavigate }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {error && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl text-sm">
+              {error}
+            </div>
+          )}
           <div>
             <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">{dict.auth.email}</label>
             <div className="relative">
@@ -41,6 +59,8 @@ export const Login: React.FC<AuthPageProps> = ({ onNavigate }) => {
               <input 
                 type="email" 
                 required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-primary outline-none transition-all dark:text-white"
                 placeholder="name@example.com"
               />
@@ -56,14 +76,19 @@ export const Login: React.FC<AuthPageProps> = ({ onNavigate }) => {
               <input 
                 type="password" 
                 required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-primary outline-none transition-all dark:text-white"
                 placeholder="••••••••"
               />
             </div>
           </div>
 
-          <button className="w-full bg-primary hover:bg-emerald-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/25 transition-all active:scale-95">
-            {dict.auth.signIn}
+          <button 
+            type="submit"
+            disabled={loading}
+            className="w-full bg-primary hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/25 transition-all active:scale-95">
+            {loading ? 'Signing in...' : dict.auth.signIn}
           </button>
         </form>
 
@@ -88,11 +113,35 @@ export const Login: React.FC<AuthPageProps> = ({ onNavigate }) => {
 export const Signup: React.FC<AuthPageProps> = ({ onNavigate }) => {
   const { dict } = useLanguage();
   const { register } = useAuth();
+  const [name, setName] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [error, setError] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    register();
-    onNavigate('dashboard');
+    setError(null);
+    setSuccess(null);
+    setLoading(true);
+
+    const result = await register(email, password, name);
+    
+    if (result.error) {
+      setError(result.error);
+      setLoading(false);
+    } else if (result.message) {
+      // Show success message for email confirmation
+      setSuccess(result.message);
+      setLoading(false);
+      // Redirect to login after 3 seconds
+      setTimeout(() => {
+        onNavigate('login');
+      }, 3000);
+    } else {
+      onNavigate('dashboard');
+    }
   };
 
   return (
@@ -109,10 +158,23 @@ export const Signup: React.FC<AuthPageProps> = ({ onNavigate }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
+          {error && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl text-sm">
+              {error}
+            </div>
+          )}
+          {success && (
+            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 px-4 py-3 rounded-xl text-sm">
+              {success}
+            </div>
+          )}
           <div>
             <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">{dict.auth.name}</label>
             <input 
               type="text" 
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
               className="w-full px-4 py-3.5 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-primary outline-none transition-all dark:text-white"
               placeholder="John Doe"
             />
@@ -121,6 +183,9 @@ export const Signup: React.FC<AuthPageProps> = ({ onNavigate }) => {
             <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">{dict.auth.email}</label>
             <input 
               type="email" 
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               className="w-full px-4 py-3.5 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-primary outline-none transition-all dark:text-white"
               placeholder="name@example.com"
             />
@@ -129,13 +194,20 @@ export const Signup: React.FC<AuthPageProps> = ({ onNavigate }) => {
             <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">{dict.auth.password}</label>
             <input 
               type="password" 
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              minLength={6}
               className="w-full px-4 py-3.5 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-primary outline-none transition-all dark:text-white"
               placeholder="••••••••"
             />
           </div>
 
-          <button className="w-full bg-primary hover:bg-emerald-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/25 transition-all active:scale-95">
-            {dict.auth.signUp}
+          <button 
+            type="submit"
+            disabled={loading}
+            className="w-full bg-primary hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/25 transition-all active:scale-95">
+            {loading ? 'Creating account...' : dict.auth.signUp}
           </button>
         </form>
 

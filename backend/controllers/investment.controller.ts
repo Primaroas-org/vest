@@ -1,7 +1,6 @@
-import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
-import { MNT } from '../utils/numeric';
-import {
+import { supabase } from '../config/supabase.js';
+import { MNT } from '../utils/numeric.js';
+import type {
     InvestRequest,
     InvestResponse,
     ErrorResponse,
@@ -9,13 +8,13 @@ import {
     Property,
     Investment,
     Transaction
-} from '../types';
+} from '../types/index.js';
 
 /**
  * POST /invest
  * Allows a user to invest in a property by purchasing shares
  */
-export async function invest(req: Request, res: Response): Promise<void> {
+export async function invest(req: any, res: any): Promise<void> {
     const { property_id, shares }: InvestRequest = req.body;
     const user = req.user as User;
 

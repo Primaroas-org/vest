@@ -222,3 +222,5 @@ export interface KYCVerificationResult {
     verified: boolean;
     message?: string;
 }
+
+// All types are exported above using ES module syntax

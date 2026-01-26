@@ -1,4 +1,4 @@
-import { KYCVerificationResult } from '../types';
+import type { KYCVerificationResult } from '../types/index.js';
 
 /**
  * Mock e-Mongolia KYC Verification Function

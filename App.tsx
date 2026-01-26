@@ -12,7 +12,7 @@ import { HowItWorks, Resources, About, Contact, Privacy } from './components/Pag
 import { Login, Signup } from './components/AuthPages';
 import { Property, ViewState } from './types';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 const mockProperties: Property[] = [
   {
@@ -47,10 +47,10 @@ const mockProperties: Property[] = [
     isFavorite: false,
     description: "A Grade-A office tower situated in the heart of Ulaanbaatar's financial district. This property hosts multinational corporations and top-tier law firms. With LEED Gold certification for sustainability and state-of-the-art facilities, it commands the highest rental rates in the city. A solid choice for investors seeking reliable, long-term commercial returns.",
     financials: {
-       totalValue: "₮ 45.0B",
-       sharePrice: "₮ 1,200,000",
-       projectedYield: "10.2%",
-       occupancyRate: "95%"
+      totalValue: "₮ 45.0B",
+      sharePrice: "₮ 1,200,000",
+      projectedYield: "10.2%",
+      occupancyRate: "95%"
     }
   },
   {
@@ -66,10 +66,10 @@ const mockProperties: Property[] = [
     isFavorite: false,
     description: "An innovative mixed-use development combining high-end retail, co-working spaces, and boutique apartments. Strategically located near the new transport hub, Sky Garden Plaza is poised for significant capital appreciation. The project targets the growing creative class and young professionals of Ulaanbaatar.",
     financials: {
-       totalValue: "₮ 8.2B",
-       sharePrice: "₮ 750,000",
-       projectedYield: "15.8%",
-       occupancyRate: "Pre-lease"
+      totalValue: "₮ 8.2B",
+      sharePrice: "₮ 750,000",
+      projectedYield: "15.8%",
+      occupancyRate: "Pre-lease"
     }
   },
   {
@@ -137,6 +137,12 @@ const MainContent: React.FC = () => {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { dict } = useLanguage();
+  const { user, isAuthenticated, loading } = useAuth();
+
+  // Debug logging
+  React.useEffect(() => {
+    console.log('Auth state in MainContent:', { user: user?.email, isAuthenticated, loading });
+  }, [user, isAuthenticated, loading]);
 
   const itemsPerPage = 3;
   const totalPages = Math.ceil(mockProperties.length / itemsPerPage);
@@ -166,8 +172,8 @@ const MainContent: React.FC = () => {
   useEffect(() => {
     // Check system preference on mount
     if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-     // Optional: Auto set dark mode
-     // setIsDark(true);
+      // Optional: Auto set dark mode
+      // setIsDark(true);
     }
   }, []);
 
@@ -269,11 +275,10 @@ const MainContent: React.FC = () => {
               <button
                 key={page}
                 onClick={() => handlePageSelect(page)}
-                className={`w-10 h-10 rounded-lg font-bold transition-colors ${
-                  currentPage === page
+                className={`w-10 h-10 rounded-lg font-bold transition-colors ${currentPage === page
                     ? 'bg-primary text-white shadow-md shadow-primary/20'
                     : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300'
-                }`}
+                  }`}
               >
                 {page}
               </button>
@@ -321,15 +326,17 @@ const MainContent: React.FC = () => {
 
   const currentView = getCurrentView();
   const isAuxiliaryPage = ['how-it-works', 'resources', 'about', 'contact', 'privacy', 'login', 'signup'].includes(currentView);
+  const isDashboard = location.pathname.startsWith('/dashboard');
+  const shouldShowNavbar = !(user && isDashboard);
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Navbar onNavigate={handleNavigate} currentView={currentView} />
+      {shouldShowNavbar && <Navbar onNavigate={handleNavigate} currentView={currentView} />}
 
       <main className="flex-grow">
         <Routes>
           <Route path="/" element={<Marketplace />} />
-          <Route path="/dashboard" element={<Dashboard onNavigate={handleNavigate} />} />
+          <Route path="/dashboard/*" element={<Dashboard onNavigate={handleNavigate} />} />
           <Route path="/login" element={<Login onNavigate={handleNavigate} />} />
           <Route path="/signup" element={<Signup onNavigate={handleNavigate} />} />
           <Route path="/property/:id" element={<PropertyDetailPage />} />
@@ -342,11 +349,11 @@ const MainContent: React.FC = () => {
         {currentView !== 'property-details' && !isAuxiliaryPage && <StatsSection />}
       </main>
 
-      {!isAuxiliaryPage && <Footer onNavigate={handleNavigate} />}
+      {!user && <Footer onNavigate={handleNavigate} />}
 
       {/* Dark Mode Toggle */}
       <button
-        className="fixed bottom-6 right-6 z-50 bg-charcoal dark:bg-white text-white dark:text-charcoal p-4 rounded-full shadow-xl hover:scale-110 transition-transform focus:outline-none focus:ring-4 focus:ring-primary/50"
+        className="fixed bottom-20 right-6 z-50 bg-charcoal dark:bg-white text-white dark:text-charcoal p-4 rounded-full shadow-xl hover:scale-110 transition-transform focus:outline-none focus:ring-4 focus:ring-primary/50"
         onClick={toggleTheme}
         aria-label="Toggle Dark Mode"
       >

@@ -1,22 +1,30 @@
-import express, { Express, Request, Response, NextFunction } from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import morgan from 'morgan';
 import dotenv from 'dotenv';
 
 // Load environment variables
 dotenv.config();
 
+import express, { Express, Request, Response, NextFunction } from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
+
 // Import middleware
-import { authenticate, requireKYC, requireAdmin } from './middleware/auth';
+import { authenticate, requireKYC, requireAdmin } from './middleware/auth.js';
 
 // Import controllers
-import { invest } from './controllers/investment.controller';
-import { getPortfolio } from './controllers/portfolio.controller';
-import { distributeRent } from './controllers/admin.controller';
+import { invest } from './controllers/investment.controller.js';
+import { getPortfolio } from './controllers/portfolio.controller.js';
+import { distributeRent } from './controllers/admin.controller.js';
+import {
+    getDashboardStats,
+    getAssets,
+    getDividends,
+    getHoldings,
+    getPerformance
+} from './controllers/dashboard.controller.js';
 
 // Import types
-import { ErrorResponse } from './types';
+import { ErrorResponse } from './types/index.js';
 
 // Initialize Express app
 const app: Express = express();
@@ -68,7 +76,7 @@ app.get('/health', (req: Request, res: Response) => {
 // Get all active properties
 app.get('/api/properties', async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase');
+        const { supabase } = await import('./config/supabase.js');
 
         const { data, error } = await supabase
             .from('properties')
@@ -100,7 +108,7 @@ app.get('/api/properties', async (req: Request, res: Response) => {
 // Get single property details
 app.get('/api/properties/:id', async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase');
+        const { supabase } = await import('./config/supabase.js');
 
         const { data, error } = await supabase
             .from('properties')
@@ -151,7 +159,7 @@ app.get('/api/user/me', authenticate, (req: Request, res: Response) => {
 // Get user transaction history
 app.get('/api/user/transactions', authenticate, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase');
+        const { supabase } = await import('./config/supabase.js');
         const { page = 1, limit = 50 } = req.query;
 
         const offset = (Number(page) - 1) * Number(limit);
@@ -200,6 +208,25 @@ app.post('/api/invest', authenticate, requireKYC, invest);
 app.get('/api/portfolio', authenticate, requireKYC, getPortfolio);
 
 // =====================================================
+// DASHBOARD ROUTES (Require Authentication)
+// =====================================================
+
+// Get dashboard statistics
+app.get('/api/dashboard/stats', authenticate, getDashboardStats);
+
+// Get user assets
+app.get('/api/dashboard/assets', authenticate, getAssets);
+
+// Get user dividends
+app.get('/api/dashboard/dividends', authenticate, getDividends);
+
+// Get user holdings
+app.get('/api/dashboard/holdings', authenticate, getHoldings);
+
+// Get user performance
+app.get('/api/dashboard/performance', authenticate, getPerformance);
+
+// =====================================================
 // ADMIN ROUTES (Require Admin Role)
 // =====================================================
 
@@ -209,7 +236,7 @@ app.post('/api/admin/distribute-rent', authenticate, requireAdmin, distributeRen
 // Create new property (admin only)
 app.post('/api/admin/properties', authenticate, requireAdmin, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase');
+        const { supabase } = await import('./config/supabase.js');
 
         const {
             name,
@@ -278,7 +305,7 @@ app.post('/api/admin/properties', authenticate, requireAdmin, async (req: Reques
 // Update property status (admin only)
 app.patch('/api/admin/properties/:id/status', authenticate, requireAdmin, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase');
+        const { supabase } = await import('./config/supabase.js');
         const { status } = req.body;
 
         if (!['draft', 'active', 'fully_funded', 'closed'].includes(status)) {
@@ -321,7 +348,7 @@ app.patch('/api/admin/properties/:id/status', authenticate, requireAdmin, async 
 // Add funds to user wallet (admin only - for testing/demo purposes)
 app.post('/api/admin/users/:userId/add-funds', authenticate, requireAdmin, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase');
+        const { supabase } = await import('./config/supabase.js');
         const { amount, description } = req.body;
         const { userId } = req.params;
 

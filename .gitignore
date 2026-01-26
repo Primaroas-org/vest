@@ -39,3 +39,6 @@ dist/
 # Database
 *.db
 *.sqlite
+
+# supabase
+supabase

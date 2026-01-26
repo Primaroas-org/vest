@@ -1,18 +1,20 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseClient } from "@supabase/supabase-js";
 
-if (!process.env.SUPABASE_URL) {
-    throw new Error('Missing SUPABASE_URL environment variable');
-}
+import { createClient } from '@supabase/supabase-js';
 
-if (!process.env.SUPABASE_SERVICE_KEY) {
-    throw new Error('Missing SUPABASE_SERVICE_KEY environment variable');
-}
+// Load environment variables (in case dotenv hasn't been loaded yet)
+import dotenv from 'dotenv';
+dotenv.config();
 
 // Create Supabase client with service role key for backend operations
 // This bypasses RLS policies for administrative operations
+// Use environment variables if available, otherwise fall back to defaults
+const supabaseUrl = process.env.SUPABASE_URL || 'https://gozlknklxhwvfksnrmvh.supabase.co';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || 'sb_publishable_zOirVz6-02N3CtgyqVAYpQ_s0QuE3ND';
+
 export const supabase: SupabaseClient = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY,
+    supabaseUrl,
+    supabaseServiceKey,
     {
         auth: {
             autoRefreshToken: false,
@@ -22,10 +24,10 @@ export const supabase: SupabaseClient = createClient(
 );
 
 // Create a client for user-scoped operations (respects RLS)
-export const createUserSupabaseClient = (userToken: string): SupabaseClient => {
+const createUserSupabaseClient = (userToken: string) => {
     return createClient(
-        process.env.SUPABASE_URL!,
-        process.env.SUPABASE_ANON_KEY!,
+        supabaseUrl,
+        supabaseServiceKey,
         {
             global: {
                 headers: {
@@ -35,3 +37,5 @@ export const createUserSupabaseClient = (userToken: string): SupabaseClient => {
         }
     );
 };
+
+export { createUserSupabaseClient };

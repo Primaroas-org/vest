@@ -1,7 +1,7 @@
 // Numeric utility functions to handle MNT currency without floating point errors
 // All amounts are stored as NUMERIC in PostgreSQL and handled as strings in TypeScript
 
-export class MNT {
+class MNT {
     /**
      * Add two MNT amounts
      */
@@ -114,3 +114,5 @@ export class MNT {
         return num.toFixed(2);
     }
 }
+
+export { MNT };

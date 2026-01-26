@@ -1,18 +1,17 @@
-import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
-import { MNT } from '../utils/numeric';
-import {
+import { supabase } from '../config/supabase.js';
+import { MNT } from '../utils/numeric.js';
+import type {
     PortfolioResponse,
     PortfolioInvestment,
     ErrorResponse,
     User
-} from '../types';
+} from '../types/index.js';
 
 /**
  * GET /portfolio
  * Returns a user's complete investment portfolio with aggregated data
  */
-export async function getPortfolio(req: Request, res: Response): Promise<void> {
+export async function getPortfolio(req: any, res: any): Promise<void> {
     const user = req.user as User;
 
     try {
