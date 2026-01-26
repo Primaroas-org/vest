@@ -1,7 +1,7 @@
 export type PropertyStatus = 'funding' | 'renting' | 'sold';
 
 export interface Property {
-  id: number;
+  id: string | number;
   title: string;
   location: string;
   type: 'Residential' | 'Commercial' | 'Mixed Use';

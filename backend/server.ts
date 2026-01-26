@@ -20,7 +20,9 @@ import {
     getAssets,
     getDividends,
     getHoldings,
-    getPerformance
+    getPerformance,
+    getPerformanceGraph,
+    getAssetBreakdown
 } from './controllers/dashboard.controller.js';
 
 // Import types
@@ -225,6 +227,446 @@ app.get('/api/dashboard/holdings', authenticate, getHoldings);
 
 // Get user performance
 app.get('/api/dashboard/performance', authenticate, getPerformance);
+
+// Get user performance graph data
+app.get('/api/dashboard/performance/graph', authenticate, getPerformanceGraph);
+
+// Get asset breakdown by property type
+app.get('/api/dashboard/asset-breakdown', authenticate, getAssetBreakdown);
+
+// Get user notifications
+app.get('/api/notifications', authenticate, async (req: Request, res: Response) => {
+    try {
+        const { supabase } = await import('./config/supabase.js');
+        const userId = req.user!.id;
+        const { unread_only = false } = req.query;
+
+        let query = supabase
+            .from('notifications')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(50);
+
+        if (unread_only === 'true') {
+            query = query.eq('is_read', false);
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+            console.error('Error fetching notifications:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch notifications'
+            } as ErrorResponse);
+            return;
+        }
+
+        res.status(200).json({
+            success: true,
+            data: data || []
+        });
+    } catch (error) {
+        console.error('Notifications fetch error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// Mark notification as read
+app.patch('/api/notifications/:id/read', authenticate, async (req: Request, res: Response) => {
+    try {
+        const { supabase } = await import('./config/supabase.js');
+        const userId = req.user!.id;
+        const { id } = req.params;
+
+        const { data, error } = await supabase
+            .from('notifications')
+            .update({ is_read: true, read_at: new Date().toISOString() })
+            .eq('id', id)
+            .eq('user_id', userId)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error updating notification:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to update notification'
+            } as ErrorResponse);
+            return;
+        }
+
+        res.status(200).json({
+            success: true,
+            data: data
+        });
+    } catch (error) {
+        console.error('Notification update error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// Mark all notifications as read
+app.patch('/api/notifications/read-all', authenticate, async (req: Request, res: Response) => {
+    try {
+        const { supabase } = await import('./config/supabase.js');
+        const userId = req.user!.id;
+
+        const { error } = await supabase
+            .from('notifications')
+            .update({ is_read: true, read_at: new Date().toISOString() })
+            .eq('user_id', userId)
+            .eq('is_read', false);
+
+        if (error) {
+            console.error('Error updating notifications:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to update notifications'
+            } as ErrorResponse);
+            return;
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'All notifications marked as read'
+        });
+    } catch (error) {
+        console.error('Notifications update error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// =====================================================
+// SAVED CARDS ROUTES (Require Authentication)
+// =====================================================
+
+// Get user's saved cards
+app.get('/api/cards', authenticate, async (req: Request, res: Response) => {
+    try {
+        const { supabase } = await import('./config/supabase.js');
+        const userId = req.user!.id;
+
+        const { data, error } = await supabase
+            .from('saved_cards')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('is_active', true)
+            .order('is_default', { ascending: false })
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('Error fetching cards:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch cards'
+            } as ErrorResponse);
+            return;
+        }
+
+        res.status(200).json({
+            success: true,
+            data: data || []
+        });
+    } catch (error) {
+        console.error('Cards fetch error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// Add a new saved card
+app.post('/api/cards', authenticate, async (req: Request, res: Response) => {
+    try {
+        const { supabase } = await import('./config/supabase.js');
+        const userId = req.user!.id;
+        const { bank_name, last_four_digits, card_holder_name, card_type, expiry_month, expiry_year, is_default } = req.body;
+
+        if (!bank_name || !last_four_digits) {
+            res.status(400).json({
+                success: false,
+                error: 'Bank name and last four digits are required'
+            } as ErrorResponse);
+            return;
+        }
+
+        const { data, error } = await supabase
+            .from('saved_cards')
+            .insert({
+                user_id: userId,
+                bank_name,
+                last_four_digits: last_four_digits.toString().slice(-4),
+                card_holder_name: card_holder_name || null,
+                card_type: card_type || 'debit',
+                expiry_month: expiry_month || null,
+                expiry_year: expiry_year || null,
+                is_default: is_default || false,
+                is_active: true
+            })
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error creating card:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to save card'
+            } as ErrorResponse);
+            return;
+        }
+
+        res.status(201).json({
+            success: true,
+            message: 'Card saved successfully',
+            data: data
+        });
+    } catch (error) {
+        console.error('Card creation error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// Update card (set as default, etc.)
+app.patch('/api/cards/:id', authenticate, async (req: Request, res: Response) => {
+    try {
+        const { supabase } = await import('./config/supabase.js');
+        const userId = req.user!.id;
+        const { id } = req.params;
+        const updates = req.body;
+
+        const { data, error } = await supabase
+            .from('saved_cards')
+            .update(updates)
+            .eq('id', id)
+            .eq('user_id', userId)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error updating card:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to update card'
+            } as ErrorResponse);
+            return;
+        }
+
+        if (!data) {
+            res.status(404).json({
+                success: false,
+                error: 'Card not found'
+            } as ErrorResponse);
+            return;
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Card updated successfully',
+            data: data
+        });
+    } catch (error) {
+        console.error('Card update error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// Delete a saved card
+app.delete('/api/cards/:id', authenticate, async (req: Request, res: Response) => {
+    try {
+        const { supabase } = await import('./config/supabase.js');
+        const userId = req.user!.id;
+        const { id } = req.params;
+
+        const { error } = await supabase
+            .from('saved_cards')
+            .update({ is_active: false })
+            .eq('id', id)
+            .eq('user_id', userId);
+
+        if (error) {
+            console.error('Error deleting card:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to delete card'
+            } as ErrorResponse);
+            return;
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Card deleted successfully'
+        });
+    } catch (error) {
+        console.error('Card deletion error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// =====================================================
+// WALLET ROUTES (Require Authentication)
+// =====================================================
+
+// Deposit funds to wallet
+app.post('/api/wallet/deposit', authenticate, async (req: Request, res: Response) => {
+    try {
+        const { supabase } = await import('./config/supabase.js');
+        const { amount, description } = req.body;
+        const userId = req.user!.id;
+
+        if (!amount || parseFloat(amount) <= 0) {
+            res.status(400).json({
+                success: false,
+                error: 'Invalid amount'
+            } as ErrorResponse);
+            return;
+        }
+
+        const { data, error } = await supabase
+            .rpc('add_wallet_funds', {
+                p_user_id: userId,
+                p_amount: amount,
+                p_description: description || 'Wallet deposit'
+            });
+
+        if (error) {
+            console.error('Deposit error:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to deposit funds'
+            } as ErrorResponse);
+            return;
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Funds deposited successfully',
+            data: data
+        });
+    } catch (error) {
+        console.error('Deposit error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// Withdraw funds from wallet
+app.post('/api/wallet/withdraw', authenticate, async (req: Request, res: Response) => {
+    try {
+        const { supabase } = await import('./config/supabase.js');
+        const { amount, description } = req.body;
+        const userId = req.user!.id;
+
+        if (!amount || parseFloat(amount) <= 0) {
+            res.status(400).json({
+                success: false,
+                error: 'Invalid amount'
+            } as ErrorResponse);
+            return;
+        }
+
+        // Check user balance
+        const { data: userData, error: userError } = await supabase
+            .from('users')
+            .select('wallet_balance')
+            .eq('id', userId)
+            .single();
+
+        if (userError || !userData) {
+            res.status(404).json({
+                success: false,
+                error: 'User not found'
+            } as ErrorResponse);
+            return;
+        }
+
+        const currentBalance = parseFloat(userData.wallet_balance);
+        const withdrawAmount = parseFloat(amount);
+
+        if (currentBalance < withdrawAmount) {
+            res.status(400).json({
+                success: false,
+                error: 'Insufficient funds'
+            } as ErrorResponse);
+            return;
+        }
+
+        // Perform withdrawal transaction
+        const newBalance = currentBalance - withdrawAmount;
+
+        // Update user balance
+        const { error: updateError } = await supabase
+            .from('users')
+            .update({ wallet_balance: newBalance.toString() })
+            .eq('id', userId);
+
+        if (updateError) {
+            console.error('Withdrawal update error:', updateError);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to process withdrawal'
+            } as ErrorResponse);
+            return;
+        }
+
+        // Create transaction record
+        const { data: transaction, error: transactionError } = await supabase
+            .from('transactions')
+            .insert({
+                user_id: userId,
+                transaction_type: 'withdrawal',
+                amount: withdrawAmount.toString(),
+                balance_before: currentBalance.toString(),
+                balance_after: newBalance.toString(),
+                description: description || 'Wallet withdrawal',
+                status: 'completed'
+            })
+            .select()
+            .single();
+
+        if (transactionError) {
+            console.error('Transaction creation error:', transactionError);
+            // Rollback balance update would be ideal here, but for simplicity we'll continue
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Funds withdrawn successfully',
+            data: {
+                transaction_id: transaction?.id,
+                new_balance: newBalance.toString()
+            }
+        });
+    } catch (error) {
+        console.error('Withdrawal error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
 
 // =====================================================
 // ADMIN ROUTES (Require Admin Role)

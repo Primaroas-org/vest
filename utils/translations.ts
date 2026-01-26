@@ -113,7 +113,7 @@ export const translations = {
       support: "Тусламж",
       stayUpdated: "Мэдээлэл авах",
       emailPlaceholder: "Имэйл хаяг",
-      copyright: "© 2024 Vest. Бүх эрх хуулиар хамгаалагдсан.",
+      copyright: "© 2026 Vest. Бүх эрх хуулиар хамгаалагдсан.",
       contact: "Холбоо барих",
       privacy: "Нууцлалын бодлого"
     },
@@ -153,6 +153,7 @@ export const translations = {
       nextPayout: "Дараагийн төлбөр",
       exploreFull: "Бүрэн багцыг үзэх",
       units: "Нэгж",
+      noPerformanceData: 'Багцын гүйцэтгэл байхгүй',
       wallet: {
         balance: "Нийт үлдэгдэл",
         available: "Боломжит үлдэгдэл",
@@ -178,7 +179,15 @@ export const translations = {
         security: "Аюулгүй байдал",
         notifications: "Мэдэгдэл",
         update: "Шинэчлэх"
-      }
+      },
+      unauthorized: {
+        title: "401",
+        heading: "Эрхгүй хандалт",
+        message: "Та самбар руу нэвтрэхийн тулд нэвтэрсэн байх ёстой. Үргэлжлүүлэхийн тулд нэвтэрнэ үү.",
+        signIn: "Нэвтрэх",
+        goHome: "Нүүр хуудас руу буцах"
+      },
+      noActiveInvestments: "Идэвхтэй хөрөнгө оруулалт байхгүй"
     }
   },
   en: {
@@ -295,7 +304,7 @@ export const translations = {
       support: "Support",
       stayUpdated: "Stay Updated",
       emailPlaceholder: "Email address",
-      copyright: "© 2024 Vest. All rights reserved.",
+      copyright: "© 2026 Vest. All rights reserved.",
       contact: "Contact Us",
       privacy: "Privacy Policy"
     },
@@ -335,6 +344,7 @@ export const translations = {
       nextPayout: "Next Payout",
       exploreFull: "Explore Full Investment Portfolio",
       units: "Units",
+      noPerformanceData: 'No performance data available',
       wallet: {
         balance: "Total Balance",
         available: "Available",
@@ -360,7 +370,15 @@ export const translations = {
         security: "Security",
         notifications: "Notifications",
         update: "Update Details"
-      }
+      },
+      unauthorized: {
+        title: "401",
+        heading: "Unauthorized Access",
+        message: "You need to be logged in to access the dashboard. Please sign in to continue.",
+        signIn: "Sign In",
+        goHome: "Go to Homepage"
+      },
+      noActiveInvestments: "No active investments"
     }
   }
 };

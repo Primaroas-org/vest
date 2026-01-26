@@ -37,10 +37,10 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({ property, onSelect }
           className={`w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 ${property.status === 'sold' ? 'grayscale-[0.5]' : ''}`}
         />
         <div className="absolute top-4 left-4 bg-white/90 dark:bg-charcoal/90 backdrop-blur-sm px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider text-charcoal dark:text-white">
-          {property.type === 'Residential' ? dict.property.residential : 
-           property.type === 'Commercial' ? dict.property.commercial : dict.property.mixed}
+          {property.type === 'Residential' ? dict.property.residential :
+            property.type === 'Commercial' ? dict.property.commercial : dict.property.mixed}
         </div>
-        
+
         {/* Status Badge */}
         <div className={`absolute bottom-4 left-4 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider shadow-sm ${getStatusColor(property.status)}`}>
           {getStatusLabel(property.status)}
@@ -52,7 +52,7 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({ property, onSelect }
           </span>
         </button>
       </div>
-      
+
       <div className="p-6 flex-grow flex flex-col">
         <h3 className="text-xl font-bold mb-1 font-display group-hover:text-primary transition-colors text-charcoal dark:text-white">
           {property.title}
@@ -81,11 +81,11 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({ property, onSelect }
               </div>
             </div>
           )}
-          
+
           {property.status === 'sold' && (
-             <div className="py-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-center">
-               <span className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">ROI Realized</span>
-             </div>
+            <div className="py-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-center">
+              <span className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">ROI Realized</span>
+            </div>
           )}
 
           <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100 dark:border-gray-800">
@@ -108,16 +108,15 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({ property, onSelect }
           </div>
         </div>
 
-        <button 
+        <button
           onClick={(e) => {
             e.stopPropagation();
             onSelect(property);
           }}
-          className={`w-full mt-6 py-3.5 rounded-xl font-bold transition-opacity active:scale-95 shadow-lg ${
-            property.status === 'sold' 
-             ? 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-700 dark:text-gray-400' 
-             : 'bg-charcoal dark:bg-white dark:text-charcoal text-white hover:opacity-90 shadow-charcoal/10 dark:shadow-white/10'
-          }`}
+          className={`w-full mt-6 py-3.5 rounded-xl font-bold transition-opacity active:scale-95 shadow-lg ${property.status === 'sold'
+            ? 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-700 dark:text-gray-400'
+            : 'bg-charcoal dark:bg-white dark:text-charcoal text-white hover:opacity-90 shadow-charcoal/10 dark:shadow-white/10'
+            }`}
         >
           {property.status === 'sold' ? 'Sold Out' : dict.property.viewDetails}
         </button>

@@ -7,6 +7,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: true // This is important for email confirmation callbacks
+    detectSessionInUrl: true, // This is important for email confirmation callbacks
+    storage: window.localStorage, // Explicitly use localStorage
+    storageKey: 'sb-auth-token' // Use Supabase's default storage key
   }
 });

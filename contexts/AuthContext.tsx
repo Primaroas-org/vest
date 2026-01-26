@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { supabase } from '../utils/supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 
@@ -25,6 +25,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const sessionHandledRef = useRef(false);
+  const fetchingProfileRef = useRef<Promise<void> | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Handle email confirmation callback
@@ -56,67 +59,206 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       handleEmailConfirmation();
     }
 
-    // Get initial session
-    const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        // Store the access token for API calls
-        localStorage.setItem('supabase.auth.token', session.access_token);
-        await fetchUserProfile(session.user);
+    // Get session IMMEDIATELY on mount (don't wait for INITIAL_SESSION event)
+    // This ensures fast auth state restoration
+    const initializeAuth = async () => {
+      try {
+        // Check localStorage first for cached token
+        const cachedToken = localStorage.getItem('supabase.auth.token');
+        
+        // Get session from Supabase (this is fast if session exists)
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('Error getting session:', error);
+          localStorage.removeItem('supabase.auth.token');
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+
+        if (session?.user && session?.access_token) {
+          // Cache the token immediately
+          localStorage.setItem('supabase.auth.token', session.access_token);
+          sessionHandledRef.current = true;
+          currentUserIdRef.current = session.user.id;
+          await fetchUserProfile(session.user);
+        } else {
+          // No session
+          localStorage.removeItem('supabase.auth.token');
+          setUser(null);
+          sessionHandledRef.current = true;
+        }
+      } catch (error) {
+        console.error('Error initializing auth:', error);
+        localStorage.removeItem('supabase.auth.token');
+        setUser(null);
+        sessionHandledRef.current = true;
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
-    getSession();
+    // Initialize immediately
+    initializeAuth();
 
-    // Listen for auth changes
+    // Listen for auth changes (for subsequent auth events)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Skip INITIAL_SESSION since we already handled it above
+      if (event === 'INITIAL_SESSION') {
+        // Only update if we haven't handled it yet (shouldn't happen, but safety check)
+        if (!sessionHandledRef.current && session?.user && session?.access_token) {
+          localStorage.setItem('supabase.auth.token', session.access_token);
+          await fetchUserProfile(session.user);
+          setLoading(false);
+        }
+        return;
+      }
+
       console.log('Auth state changed:', event, session?.user?.email);
 
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        if (session?.user) {
+        if (session?.user && session?.access_token) {
           console.log('Processing sign in for user:', session.user.id);
           // Store the access token for API calls
           localStorage.setItem('supabase.auth.token', session.access_token);
+          // fetchUserProfile will handle duplicate prevention internally
           await fetchUserProfile(session.user);
           console.log('Finished fetching user profile');
+        } else if (event === 'TOKEN_REFRESHED' && session?.access_token) {
+          // Just update token if it was refreshed but user profile fetch isn't needed
+          localStorage.setItem('supabase.auth.token', session.access_token);
         }
       } else if (event === 'SIGNED_OUT') {
         console.log('User signed out');
         // Clear the token when logged out
         localStorage.removeItem('supabase.auth.token');
         setUser(null);
+        currentUserIdRef.current = null;
+        fetchingProfileRef.current = null;
+      } else if (event === 'USER_UPDATED') {
+        // Handle user updates (e.g., email confirmation)
+        if (session?.user && session?.access_token) {
+          localStorage.setItem('supabase.auth.token', session.access_token);
+          await fetchUserProfile(session.user);
+        }
       }
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      sessionHandledRef.current = false;
+    };
   }, []);
 
   const fetchUserProfile = async (supabaseUser: SupabaseUser) => {
-    try {
-      // Fetch user profile from users table
-      const { data: profile, error } = await supabase
+    // If a fetch is already in progress for this user, wait for it to complete
+    if (fetchingProfileRef.current && currentUserIdRef.current === supabaseUser.id) {
+      console.log('Profile fetch already in progress for user:', supabaseUser.id, '- waiting for completion');
+      try {
+        await fetchingProfileRef.current;
+        // After waiting, check if user was set - if not, the fetch might have failed
+        // We'll let the current fetch complete and trust it set the user
+        return;
+      } catch (error) {
+        console.error('Error waiting for profile fetch:', error);
+        // If the in-progress fetch failed, we'll retry
+        fetchingProfileRef.current = null;
+        currentUserIdRef.current = null;
+      }
+    }
+
+    // Create a promise for this fetch
+    const fetchPromise = (async () => {
+      currentUserIdRef.current = supabaseUser.id;
+
+      try {
+      console.log('Fetching user profile for ID:', supabaseUser.id);
+
+      // Create a timeout that actually rejects after 3 seconds
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => {
+          reject(new Error('TIMEOUT'));
+        }, 3000)
+      );
+
+      const queryPromise = supabase
         .from('users')
         .select('*')
         .eq('id', supabaseUser.id)
         .single();
 
+      // Race between query and timeout - if timeout wins, we'll catch and use fallback
+      let profile, error;
+      try {
+        const result = await Promise.race([queryPromise, timeoutPromise]);
+        // If we got here, query completed (timeout didn't win)
+        profile = result.data;
+        error = result.error;
+      } catch (timeoutError: any) {
+        if (timeoutError?.message === 'TIMEOUT' || timeoutError?.message?.includes('timeout')) {
+          console.error('Profile query timed out after 3 seconds - using fallback user');
+          error = { code: 'TIMEOUT', message: 'Query timeout' };
+          profile = null;
+        } else {
+          // Some other error occurred
+          throw timeoutError;
+        }
+      }
+
+      console.log('Profile fetch result:', { profile, error, errorCode: error?.code });
+
       if (error) {
         console.error('Error fetching profile:', error);
+        
+        // Handle timeout - set fallback user immediately
+        if (error.code === 'TIMEOUT') {
+          console.log('Query timed out, setting fallback user');
+          const fallbackUser: User = {
+            id: supabaseUser.id,
+            name: supabaseUser.user_metadata?.full_name || supabaseUser.email?.split('@')[0] || 'User',
+            email: supabaseUser.email || '',
+            avatar: supabaseUser.user_metadata?.avatar_url,
+            isVerified: false,
+            balance: 0
+          };
+          console.log('Setting fallback user due to timeout:', fallbackUser);
+          setUser(fallbackUser);
+          return;
+        }
+        
         // If user doesn't exist in users table (PGRST116 = no rows returned), create it
         if (error.code === 'PGRST116') {
           console.log('User not found in database, creating user record...');
           await createUserFromAuth(supabaseUser);
+
+          // Wait a moment for the database to process
+          await new Promise(resolve => setTimeout(resolve, 500));
+
           // Retry fetching after creating
+          console.log('Retrying profile fetch after creation...');
           const { data: newProfile, error: retryError } = await supabase
             .from('users')
             .select('*')
             .eq('id', supabaseUser.id)
             .single();
 
+          console.log('Retry result:', { newProfile, retryError });
+
           if (retryError) {
             console.error('Error fetching profile after creation:', retryError);
+            // Even if retry fails, set a basic user object so login can proceed
+            const fallbackUser: User = {
+              id: supabaseUser.id,
+              name: supabaseUser.user_metadata?.full_name || supabaseUser.email?.split('@')[0] || 'User',
+              email: supabaseUser.email || '',
+              avatar: supabaseUser.user_metadata?.avatar_url,
+              isVerified: false,
+              balance: 0
+            };
+            console.log('Setting fallback user due to retry error:', fallbackUser);
+            setUser(fallbackUser);
             return;
           }
 
@@ -128,9 +270,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             isVerified: newProfile?.kyc_status === 'verified' || false,
             balance: parseFloat(newProfile?.wallet_balance || '0')
           };
+          console.log('User profile loaded after creation:', userData);
           setUser(userData);
           return;
         }
+        console.error('Non-recoverable error fetching profile, code:', error.code);
+        // Even on error, set a basic user object so login can proceed
+        const fallbackUser: User = {
+          id: supabaseUser.id,
+          name: supabaseUser.user_metadata?.full_name || supabaseUser.email?.split('@')[0] || 'User',
+          email: supabaseUser.email || '',
+          avatar: supabaseUser.user_metadata?.avatar_url,
+          isVerified: false,
+          balance: 0
+        };
+        console.log('Setting fallback user due to non-recoverable error:', fallbackUser);
+        setUser(fallbackUser);
         return;
       }
 
@@ -143,16 +298,43 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         balance: parseFloat(profile?.wallet_balance || '0')
       };
 
-      console.log('User profile loaded:', userData);
-      setUser(userData);
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
-    }
+        console.log('User profile loaded:', userData);
+        setUser(userData);
+        console.log('User state set successfully');
+      } catch (error) {
+        console.error('Error fetching user profile (exception):', error);
+        // Set fallback user even on exception
+        const fallbackUser: User = {
+          id: supabaseUser.id,
+          name: supabaseUser.user_metadata?.full_name || supabaseUser.email?.split('@')[0] || 'User',
+          email: supabaseUser.email || '',
+          avatar: supabaseUser.user_metadata?.avatar_url,
+          isVerified: false,
+          balance: 0
+        };
+        console.log('Setting fallback user due to exception:', fallbackUser);
+        setUser(fallbackUser);
+      } finally {
+        console.log('Profile fetch completed, clearing refs');
+        fetchingProfileRef.current = null;
+        currentUserIdRef.current = null;
+      }
+    })();
+
+    fetchingProfileRef.current = fetchPromise;
+    await fetchPromise;
+    console.log('fetchUserProfile function completed');
   };
 
   const createUserFromAuth = async (supabaseUser: SupabaseUser) => {
     try {
-      const { error } = await supabase
+      console.log('Creating user record:', {
+        id: supabaseUser.id,
+        email: supabaseUser.email,
+        full_name: supabaseUser.user_metadata?.full_name || 'User'
+      });
+
+      const { data, error } = await supabase
         .from('users')
         .insert({
           id: supabaseUser.id,
@@ -162,13 +344,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           kyc_status: 'pending',
           is_active: true,
           is_admin: false
-        });
+        })
+        .select()
+        .single();
 
       if (error) {
-        console.error('Error creating user:', error);
+        console.error('Error creating user:', error, 'Error code:', error.code);
+      } else {
+        console.log('User created successfully:', data);
       }
     } catch (error) {
-      console.error('Error creating user from auth:', error);
+      console.error('Error creating user from auth (exception):', error);
     }
   };
 
