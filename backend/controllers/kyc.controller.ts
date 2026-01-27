@@ -9,10 +9,24 @@ import type { User, ErrorResponse } from '../types/index.js';
 // This is needed because storage uploads require service role key to bypass RLS
 const getStorageClient = () => {
     const supabaseUrl = process.env.SUPABASE_URL || 'https://gozlknklxhwvfksnrmvh.supabase.co';
+    
+    // Service role key is a JWT token starting with 'eyJ' - this bypasses RLS
+    // The 'sb_' keys are publishable/anon keys and will respect RLS
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
     
-    // Accept both legacy JWT format (eyJ...) and new publishable format (sb_...)
-    if (serviceRoleKey && (serviceRoleKey.startsWith('eyJ') || serviceRoleKey.startsWith('sb_'))) {
+    console.log('[KYC Storage] Checking service role key...');
+    console.log('[KYC Storage] Service role key present:', !!serviceRoleKey);
+    if (serviceRoleKey) {
+        const keyType = serviceRoleKey.startsWith('eyJ') ? 'JWT (Service Role - bypasses RLS)' 
+            : serviceRoleKey.startsWith('sb_') ? 'Publishable (Anon - respects RLS)' 
+            : 'Unknown format';
+        console.log('[KYC Storage] Service role key format:', keyType);
+        console.log('[KYC Storage] Key preview:', serviceRoleKey.substring(0, 20) + '...');
+    }
+    
+    // Only use JWT format (eyJ...) as service role key - this bypasses RLS
+    if (serviceRoleKey && serviceRoleKey.startsWith('eyJ')) {
+        console.log('[KYC Storage] ✓ Using service role key for storage operations (bypasses RLS)');
         return createClient(supabaseUrl, serviceRoleKey, {
             auth: {
                 autoRefreshToken: false,
@@ -21,7 +35,30 @@ const getStorageClient = () => {
         });
     }
     
-    // Fallback: use the default client (may have RLS issues)
+    // If no service role key or wrong format, log warning
+    if (!serviceRoleKey) {
+        console.error('[KYC Storage] ❌ ERROR: No service role key found!');
+    } else {
+        console.error('[KYC Storage] ❌ ERROR: Service role key is not in JWT format (should start with "eyJ")');
+        console.error('[KYC Storage] Current key appears to be an anon/publishable key which respects RLS');
+    }
+    console.error('[KYC Storage] Storage uploads will fail due to RLS policies.');
+    console.error('[KYC Storage] To fix: Set SUPABASE_SERVICE_ROLE_KEY in .env with your service role key');
+    console.error('[KYC Storage] Get it from: Supabase Dashboard > Settings > API > service_role key (starts with eyJ)');
+    
+    // Still try to use it, but it will likely fail
+    if (serviceRoleKey) {
+        console.log('[KYC Storage] Attempting to use provided key anyway (may fail due to RLS)...');
+        return createClient(supabaseUrl, serviceRoleKey, {
+            auth: {
+                autoRefreshToken: false,
+                persistSession: false
+            }
+        });
+    }
+    
+    // Fallback: use the default client (will have RLS issues)
+    console.log('[KYC Storage] Using default supabase client (will have RLS issues)');
     return supabase;
 };
 
@@ -61,7 +98,24 @@ interface KYCSubmissionResponse {
 export async function submitKYC(req: any, res: any): Promise<void> {
     console.log('[KYC Controller] submitKYC called');
     const user = req.user as User;
+    
+    if (!user || !user.id) {
+        console.error('[KYC Controller] No user found in request');
+        res.status(401).json({
+            success: false,
+            error: 'Authentication required'
+        } as ErrorResponse);
+        return;
+    }
+    
     const { rd_number, document_type, front_document, back_document, selfie }: KYCSubmissionRequest = req.body;
+    console.log('[KYC Controller] Request body fields present:', {
+        rd_number: !!rd_number,
+        document_type: !!document_type,
+        front_document: !!front_document,
+        back_document: !!back_document,
+        selfie: !!selfie
+    });
 
     try {
         // Validation
@@ -160,44 +214,113 @@ export async function submitKYC(req: any, res: any): Promise<void> {
 
         // Update user record with KYC data
         // Note: We'll set status to 'pending' for manual review, or 'verified' if auto-verification passes
+        console.log('[KYC Controller] Updating user KYC data for user ID:', userId);
+        console.log('[KYC Controller] KYC data keys:', Object.keys(kycData));
+        
+        // First verify user exists
+        const existingUser = await db
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
+        
+        if (!existingUser || existingUser.length === 0) {
+            console.error('[KYC Controller] User not found in database:', userId);
+            res.status(404).json({
+                success: false,
+                error: 'User not found'
+            } as ErrorResponse);
+            return;
+        }
+        
+        console.log('[KYC Controller] User found, proceeding with update');
+        
+        // Clear progress from kycData since submission is complete
+        // Keep the submitted documents but remove progress tracking
+        const finalKycData = {
+            ...kycData,
+            progress: undefined // Clear progress after submission
+        };
+
         const updatedUsers = await db
             .update(users)
             .set({
                 eMongoliaId: rd_number,
-                kycData: kycData as any,
+                kycData: finalKycData as any,
                 kycStatus: 'pending', // Will be updated to 'verified' after manual/admin review
                 updatedAt: new Date(),
             })
             .where(eq(users.id, userId))
             .returning();
 
+        console.log('[KYC Controller] Update result:', updatedUsers?.length || 0, 'users updated');
+        
+        if (updatedUsers && updatedUsers.length > 0) {
+            console.log('[KYC Controller] Updated user kycStatus:', updatedUsers[0].kycStatus);
+            console.log('[KYC Controller] Updated user eMongoliaId:', updatedUsers[0].eMongoliaId);
+        }
+
         if (!updatedUsers || updatedUsers.length === 0) {
-            console.error('Error updating user KYC data: No user found');
+            console.error('[KYC Controller] Error updating user KYC data: No user found after update');
             res.status(500).json({
                 success: false,
                 error: 'Failed to save KYC data. Please try again.'
             } as ErrorResponse);
             return;
         }
+        
+        console.log('[KYC Controller] User KYC data updated successfully');
 
-        // For now, we'll set status to 'pending' for manual review
-        // In production, you might want to call e-Mongolia API here for auto-verification
-        // and set status to 'verified' if verification succeeds
+        // For development/testing: Auto-verify KYC if AUTO_VERIFY_KYC env var is set
+        // In production, this should be 'pending' for manual review
+        const autoVerify = process.env.AUTO_VERIFY_KYC === 'true';
+        let finalStatus: 'pending' | 'verified' = 'pending';
+        let verifiedAt: Date | undefined = undefined;
+
+        if (autoVerify) {
+            console.log('[KYC Controller] Auto-verifying KYC (development mode)');
+            finalStatus = 'verified';
+            verifiedAt = new Date();
+            
+            // Update status to verified
+            const verifiedUsers = await db
+                .update(users)
+                .set({
+                    kycStatus: 'verified',
+                    kycVerifiedAt: verifiedAt,
+                    updatedAt: new Date(),
+                })
+                .where(eq(users.id, userId))
+                .returning();
+            
+            console.log('[KYC Controller] KYC auto-verified:', verifiedUsers[0]?.kycStatus);
+        }
 
         res.status(200).json({
             success: true,
-            message: 'KYC documents submitted successfully. Your verification is pending review.',
+            message: autoVerify 
+                ? 'KYC documents submitted and verified successfully.'
+                : 'KYC documents submitted successfully. Your verification is pending review.',
             data: {
-                kyc_status: 'pending',
-                kyc_verified_at: undefined
+                kyc_status: finalStatus,
+                kyc_verified_at: verifiedAt
             }
         } as KYCSubmissionResponse);
 
-    } catch (error) {
-        console.error('KYC submission error:', error);
+    } catch (error: any) {
+        console.error('[KYC Controller] KYC submission error:', error);
+        console.error('[KYC Controller] Error stack:', error.stack);
+        console.error('[KYC Controller] Error message:', error.message);
+        
+        // Provide more detailed error message
+        let errorMessage = 'An error occurred while submitting your KYC documents';
+        if (error.message) {
+            errorMessage += `: ${error.message}`;
+        }
+        
         res.status(500).json({
             success: false,
-            error: 'An error occurred while submitting your KYC documents'
+            error: errorMessage
         } as ErrorResponse);
     }
 }

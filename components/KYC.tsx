@@ -24,11 +24,33 @@ export const KYCEntry: React.FC<KYCProps> = ({ onNavigate }) => {
         return;
       }
 
+      // Don't auto-redirect if KYC is already submitted (pending or verified)
+      // Only redirect if user hasn't started KYC yet
+      // Note: We check user.isVerified, but 'pending' status means isVerified is false
+      // So we need to check the actual KYC status from the API
       try {
         const token = localStorage.getItem('supabase.auth.token');
         if (!token) {
           setLoading(false);
           return;
+        }
+
+        // First check current KYC status
+        const statusResponse = await fetch('/api/user/me', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (statusResponse.ok) {
+          const statusData = await statusResponse.json();
+          // If KYC status is 'pending' or 'verified', don't auto-redirect
+          // Only redirect if status is null/undefined (not started)
+          if (statusData.data?.kyc_status === 'pending' || statusData.data?.kyc_status === 'verified') {
+            console.log('[KYC Entry] KYC already submitted, status:', statusData.data.kyc_status);
+            setLoading(false);
+            return;
+          }
         }
 
         const response = await fetch('/api/kyc/progress', {
@@ -66,7 +88,7 @@ export const KYCEntry: React.FC<KYCProps> = ({ onNavigate }) => {
     };
 
     loadProgress();
-  }, [user]);
+  }, [user, navigate]);
 
   const handleStartVerification = () => {
     // Resume from last step if available
@@ -234,10 +256,17 @@ export const KYCRDNumber: React.FC<KYCProps> = ({ onNavigate }) => {
     loadProgress();
   }, [user]);
 
+  const digitsInputRef = React.useRef<HTMLInputElement>(null);
+
   const handleLettersChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/[^А-ЯЁ]/gi, '').toUpperCase().slice(0, 2);
     setLetters(value);
     setError(null);
+    
+    // Auto-focus digits input when 2 letters are entered
+    if (value.length === 2 && digitsInputRef.current) {
+      digitsInputRef.current.focus();
+    }
   };
 
   const handleDigitsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -360,6 +389,13 @@ export const KYCRDNumber: React.FC<KYCProps> = ({ onNavigate }) => {
                   <input
                     value={letters}
                     onChange={handleLettersChange}
+                    onKeyDown={(e) => {
+                      // If Enter is pressed and we have 2 letters, focus digits input
+                      if (e.key === 'Enter' && letters.length === 2 && digitsInputRef.current) {
+                        e.preventDefault();
+                        digitsInputRef.current.focus();
+                      }
+                    }}
                     className="w-full h-14 px-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-lg font-bold text-charcoal dark:text-white placeholder:text-gray-300 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all uppercase text-center tracking-widest"
                     maxLength={2}
                     placeholder="АА"
@@ -380,8 +416,16 @@ export const KYCRDNumber: React.FC<KYCProps> = ({ onNavigate }) => {
                 </label>
                 <div className="relative group">
                   <input
+                    ref={digitsInputRef}
                     value={digits}
                     onChange={handleDigitsChange}
+                    onKeyDown={(e) => {
+                      // Submit on Enter key if form is valid
+                      if (e.key === 'Enter' && letters.length === 2 && digits.length === 8) {
+                        e.preventDefault();
+                        handleContinue();
+                      }
+                    }}
                     className="w-full h-14 px-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-lg font-bold text-charcoal dark:text-white placeholder:text-gray-300 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all tracking-[0.15em]"
                     inputMode="numeric"
                     maxLength={8}
@@ -581,12 +625,16 @@ export const KYCDocumentUpload: React.FC<KYCProps> = ({ onNavigate }) => {
     e.preventDefault();
   };
 
+  const [isSaving, setIsSaving] = React.useState(false);
+
   const handleContinue = async () => {
     if (!frontFile || !backFile) {
       setErrorMessage(dict.kyc.uploadBothSides || 'Please upload both front and back of your ID');
       setShowErrorModal(true);
       return;
     }
+    
+    setIsSaving(true);
     
     // Store document type
     sessionStorage.setItem('kyc_document_type', documentType);
@@ -623,6 +671,8 @@ export const KYCDocumentUpload: React.FC<KYCProps> = ({ onNavigate }) => {
     } catch (error) {
       console.error('[KYC Document Upload] Error saving KYC progress:', error);
       // Continue even if save fails
+    } finally {
+      setIsSaving(false);
     }
 
     // Navigate to next step (selfie verification - step 4)
@@ -809,13 +859,20 @@ export const KYCDocumentUpload: React.FC<KYCProps> = ({ onNavigate }) => {
             {/* Continue Button */}
             <button
               onClick={handleContinue}
-              disabled={!canContinue}
+              disabled={!canContinue || isSaving}
               className={`w-full flex items-center justify-center h-14 rounded-xl font-bold text-lg transition-all active:scale-95 ${
-                canContinue
+                canContinue && !isSaving
                   ? 'bg-primary hover:bg-emerald-600 text-white shadow-lg shadow-primary/25'
                   : 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed opacity-80'
               }`}>
-              {dict.kyc.continue || 'Continue'}
+              {isSaving ? (
+                <>
+                  <span className="material-icons-round animate-spin mr-2">refresh</span>
+                  <span>{dict.kyc.saving || 'Saving...'}</span>
+                </>
+              ) : (
+                <span>{dict.kyc.continue || 'Continue'}</span>
+              )}
             </button>
 
             {/* Trust Badges */}
@@ -1127,7 +1184,7 @@ export const KYCSelfie: React.FC<KYCProps> = ({ onNavigate }) => {
       sessionStorage.removeItem('kyc_back_document');
       sessionStorage.removeItem('kyc_selfie');
 
-      // Navigate to success screen
+      // Navigate to success screen (refresh will happen in complete page)
       navigate('/kyc/complete');
     } catch (error) {
       console.error('KYC submission error:', error);
@@ -1347,16 +1404,54 @@ export const KYCSelfie: React.FC<KYCProps> = ({ onNavigate }) => {
 
 export const KYCComplete: React.FC<KYCProps> = ({ onNavigate }) => {
   const { dict } = useLanguage();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
+  const [hasRefreshed, setHasRefreshed] = React.useState(false);
 
   // Refresh user data to get updated KYC status
   React.useEffect(() => {
-    // Trigger a page reload after a short delay to refresh user data
+    const refreshUserData = async (retryCount = 0) => {
+      if (hasRefreshed && retryCount === 0) return; // Only refresh once unless retrying
+      
+      try {
+        console.log('[KYC Complete] Refreshing user data...', retryCount > 0 ? `(retry ${retryCount})` : '');
+        if (refreshUser) {
+          await refreshUser();
+          
+          // Wait for state to update
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Verify the status was updated by checking the user from context
+          // We'll use a callback to check after state update
+          setTimeout(() => {
+            // After refresh, check if we need to retry
+            if (retryCount < 2) {
+              // Retry once more to ensure we get the latest data
+              refreshUserData(retryCount + 1);
+            } else {
+              console.log('[KYC Complete] User data refreshed successfully');
+              setHasRefreshed(true);
+            }
+          }, 300);
+        }
+      } catch (error) {
+        console.error('[KYC Complete] Error refreshing user data:', error);
+        if (retryCount < 2) {
+          // Retry on error
+          setTimeout(() => refreshUserData(retryCount + 1), 1000);
+        } else {
+          setHasRefreshed(true);
+        }
+      }
+    };
+
+    // Refresh after a delay to ensure backend has processed the update
+    // Use a longer delay to ensure database transaction is committed
     const timer = setTimeout(() => {
-      window.location.reload();
-    }, 2000);
+      refreshUserData();
+    }, 1500);
+
     return () => clearTimeout(timer);
-  }, []);
+  }, [refreshUser, hasRefreshed]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark py-20 px-4 relative overflow-hidden">

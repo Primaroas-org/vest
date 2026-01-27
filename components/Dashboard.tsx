@@ -179,6 +179,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         }
     }, [authLoading]);
 
+    // Debug: Log kycStatus changes
+    useEffect(() => {
+        if (user) {
+            console.log('[Dashboard] User kycStatus:', user.kycStatus);
+        }
+    }, [user?.kycStatus]);
+
     useEffect(() => {
         const fetchUnreadCount = async () => {
             if (!user) return;
@@ -464,7 +471,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                             </div>
                         </div>
                         <div className="h-10 w-px bg-gray-300 dark:bg-gray-600"></div>
-                        {!user.isVerified && (
+                        {/* Only show KYC button if KYC hasn't been started (no status) or was rejected */}
+                        {(!user.kycStatus || user.kycStatus === 'rejected') && (
                             <button
                                 onClick={() => onNavigate('kyc')}
                                 className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-emerald-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 transition-all active:scale-95">
@@ -472,18 +480,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                                 {dict.kyc.buttonText || 'KYC'}
                             </button>
                         )}
+                        {/* Show pending badge if KYC is pending */}
+                        {user.kycStatus === 'pending' && (
+                            <div className="flex items-center gap-2 px-4 py-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded-xl font-bold text-sm">
+                                <span className="material-icons-round text-base animate-pulse">hourglass_empty</span>
+                                Pending
+                            </div>
+                        )}
+                        {/* Show verified badge if KYC is verified */}
+                        {user.kycStatus === 'verified' && (
+                            <div className="flex items-center gap-2 px-4 py-2 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-xl font-bold text-sm">
+                                <span className="material-icons-round text-base">verified</span>
+                                {dict.dashboard.kycVerified || 'Verified'}
+                            </div>
+                        )}
                         <div className="flex items-center gap-4">
                             <div className="text-right">
                                 <p className="text-sm font-bold text-gray-900 dark:text-white leading-tight">{user.name}</p>
-                                <button
-                                    onClick={() => !user.isVerified && onNavigate('kyc')}
-                                    className={`text-[11px] font-bold uppercase tracking-wider transition-colors ${
-                                        user.isVerified 
-                                            ? 'text-emerald-500 dark:text-emerald-400 cursor-default' 
-                                            : 'text-emerald-500 dark:text-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-300 cursor-pointer underline'
-                                    }`}>
-                                    {user.isVerified ? dict.dashboard.kycVerified : 'Pending'}
-                                </button>
+                                <div className={`text-[11px] font-bold uppercase tracking-wider ${
+                                    user.kycStatus === 'verified'
+                                        ? 'text-emerald-500 dark:text-emerald-400' 
+                                        : user.kycStatus === 'pending'
+                                        ? 'text-yellow-500 dark:text-yellow-400'
+                                        : user.kycStatus === 'rejected'
+                                        ? 'text-red-500 dark:text-red-400'
+                                        : 'text-gray-500 dark:text-gray-400'
+                                }`}>
+                                    {user.kycStatus === 'verified' 
+                                        ? (dict.dashboard.kycVerified || 'Verified')
+                                        : user.kycStatus === 'pending'
+                                        ? 'Pending'
+                                        : user.kycStatus === 'rejected'
+                                        ? 'Rejected'
+                                        : 'Not Started'}
+                                </div>
                             </div>
                             <div className="size-12 rounded-2xl bg-gray-300 dark:bg-gray-600 overflow-hidden border-2 border-white dark:border-gray-700 shadow-lg" style={{ backgroundImage: `url('${user.avatar}')`, backgroundSize: "cover" }}></div>
                         </div>

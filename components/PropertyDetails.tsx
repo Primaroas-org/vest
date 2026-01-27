@@ -115,9 +115,16 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
       return;
     }
 
-    if (!user.isVerified) {
-      // Show KYC prompt modal
+    // Check KYC status - only allow investment if verified
+    if (!user.kycStatus || user.kycStatus === 'rejected') {
+      // Show KYC prompt modal for users who haven't started or were rejected
       setShowKYCModal(true);
+      return;
+    }
+
+    if (user.kycStatus === 'pending') {
+      // Don't allow investment while pending
+      setError('Your KYC verification is pending. Please wait up to 24 hours for review.');
       return;
     }
 
@@ -383,12 +390,33 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
                   <span className="font-bold">+ ₮ {calculateEstimatedReturn().toLocaleString()}</span>
                 </div>
 
-                <button
-                  onClick={handleInvest}
-                  disabled={loading || !isAuthenticated}
-                  className="w-full bg-primary hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/25 transition-all active:scale-95">
-                  {loading ? 'Processing...' : !isAuthenticated ? 'Login to Invest' : !user?.isVerified ? dict.kyc.completeKYCToInvest : dict.details.investNow}
-                </button>
+                {/* Show pending message if KYC is pending */}
+                {user?.kycStatus === 'pending' ? (
+                  <div className="w-full bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-200 py-4 px-4 rounded-xl text-center">
+                    <div className="flex items-center justify-center gap-2 mb-2">
+                      <span className="material-icons-round text-lg animate-pulse">hourglass_empty</span>
+                      <span className="font-bold text-sm">{dict.kyc.verificationPending || 'KYC Verification Pending'}</span>
+                    </div>
+                    <p className="text-xs text-yellow-700 dark:text-yellow-300">
+                      {dict.kyc.pendingMessage || 'Your documents are under review. Please wait up to 24 hours for verification.'}
+                    </p>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleInvest}
+                    disabled={loading || !isAuthenticated || (user && user.kycStatus === 'pending')}
+                    className="w-full bg-primary hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/25 transition-all active:scale-95">
+                    {loading 
+                      ? 'Processing...' 
+                      : !isAuthenticated 
+                        ? 'Login to Invest' 
+                        : !user?.kycStatus || user.kycStatus === 'rejected'
+                          ? (dict.kyc.completeKYCToInvest || 'Complete KYC to Invest')
+                          : user.kycStatus === 'verified'
+                            ? dict.details.investNow
+                            : 'Complete KYC to Invest'}
+                  </button>
+                )}
                 <p className="text-xs text-center text-gray-400 mt-4">
                   *Returns are projected and not guaranteed.
                 </p>

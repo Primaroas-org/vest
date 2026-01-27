@@ -50,10 +50,12 @@ const MainContent: React.FC = () => {
 
         if (data.success && data.data) {
           // Map database properties to frontend Property type
+          // Note: Drizzle ORM returns camelCase field names
           const mappedProperties: Property[] = data.data.map((prop: any) => {
             // Calculate progress percentage
-            const totalShares = prop.total_shares || 1;
-            const availableShares = prop.available_shares || 0;
+            // Support both camelCase (Drizzle) and snake_case (legacy)
+            const totalShares = prop.totalShares || prop.total_shares || 1;
+            const availableShares = prop.availableShares || prop.available_shares || 0;
             const progress = totalShares > 0
               ? Math.round(((totalShares - availableShares) / totalShares) * 100)
               : 0;
@@ -73,13 +75,19 @@ const MainContent: React.FC = () => {
               ? prop.images[0]
               : prop.image || '';
 
-            // Map property type
+            // Map property type - support both camelCase and snake_case
+            const propertyType = prop.propertyType || prop.property_type || 'residential';
             let type: 'Residential' | 'Commercial' | 'Mixed Use' = 'Residential';
-            if (prop.property_type === 'commercial') {
+            if (propertyType === 'commercial') {
               type = 'Commercial';
-            } else if (prop.property_type === 'mixed') {
+            } else if (propertyType === 'mixed') {
               type = 'Mixed Use';
             }
+
+            // Support both camelCase (Drizzle) and snake_case (legacy)
+            const pricePerShare = prop.pricePerShare || prop.price_per_share || '0';
+            const totalValuation = prop.totalValuation || prop.total_valuation || '0';
+            const expectedAnnualYield = prop.expectedAnnualYield || prop.expected_annual_yield || '0';
 
             return {
               id: prop.id,
@@ -89,16 +97,16 @@ const MainContent: React.FC = () => {
               status: status,
               image: image,
               progress: progress,
-              targetReturn: parseFloat(prop.expected_annual_yield || '0'),
-              minInvest: `₮ ${parseFloat(prop.price_per_share || '0').toLocaleString()}`,
+              targetReturn: parseFloat(String(expectedAnnualYield)) || 0,
+              minInvest: `₮ ${parseFloat(String(pricePerShare)).toLocaleString()}`,
               isFavorite: false,
               description: prop.description || '',
               latitude: prop.latitude,
               longitude: prop.longitude,
               financials: {
-                totalValue: `₮ ${parseFloat(prop.total_valuation || '0').toLocaleString()}`,
-                sharePrice: `₮ ${parseFloat(prop.price_per_share || '0').toLocaleString()}`,
-                projectedYield: `${prop.expected_annual_yield || '0'}%`,
+                totalValue: `₮ ${parseFloat(String(totalValuation)).toLocaleString()}`,
+                sharePrice: `₮ ${parseFloat(String(pricePerShare)).toLocaleString()}`,
+                projectedYield: `${parseFloat(String(expectedAnnualYield)) || 0}%`,
                 occupancyRate: prop.status === 'fully_funded' ? '100%' : 'Pre-lease'
               }
             };
@@ -296,29 +304,127 @@ const MainContent: React.FC = () => {
   // Property Details component
   const PropertyDetailPage: React.FC = () => {
     const { id } = useParams<{ id: string }>();
-    const property = properties.find(p => String(p.id) === String(id));
-    return property ? (
-      <PropertyDetails property={property} onNavigate={handleNavigate} />
-    ) : (
-      <div className="min-h-screen flex items-center justify-center">
-        {propertiesLoading ? (
-          <div className="min-h-screen flex items-center justify-center">
-            <div className="max-w-4xl w-full mx-auto px-4">
-              <div className="bg-white dark:bg-charcoal rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-800 animate-pulse">
-                <div className="h-96 bg-gray-200 dark:bg-gray-700"></div>
-                <div className="p-8 space-y-4">
-                  <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
-                  <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
-                  <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded"></div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="h-20 bg-gray-200 dark:bg-gray-700 rounded"></div>
-                    <div className="h-20 bg-gray-200 dark:bg-gray-700 rounded"></div>
-                  </div>
+    const [property, setProperty] = useState<Property | null>(null);
+    const [loadingProperty, setLoadingProperty] = useState(true);
+
+    // Try to find property in list first
+    useEffect(() => {
+      const foundProperty = properties.find(p => String(p.id) === String(id));
+      if (foundProperty) {
+        setProperty(foundProperty);
+        setLoadingProperty(false);
+        return;
+      }
+
+      // If not found in list, fetch directly from API
+      const fetchProperty = async () => {
+        try {
+          setLoadingProperty(true);
+          const response = await fetch(`/api/properties/${id}`);
+          
+          if (!response.ok) {
+            setLoadingProperty(false);
+            return;
+          }
+
+          const data = await response.json();
+          if (data.success && data.data) {
+            const prop = data.data;
+            
+            // Calculate progress percentage
+            const totalShares = prop.totalShares || prop.total_shares || 1;
+            const availableShares = prop.availableShares || prop.available_shares || 0;
+            const progress = totalShares > 0
+              ? Math.round(((totalShares - availableShares) / totalShares) * 100)
+              : 0;
+
+            // Map status
+            let status: PropertyStatus = 'funding';
+            if (prop.status === 'fully_funded' || prop.status === 'closed') {
+              status = 'sold';
+            } else if (prop.status === 'active' && progress === 100) {
+              status = 'renting';
+            } else if (prop.status === 'active') {
+              status = 'funding';
+            }
+
+            // Get image from images array
+            const image = Array.isArray(prop.images) && prop.images.length > 0
+              ? prop.images[0]
+              : prop.image || '';
+
+            // Map property type
+            const propertyType = prop.propertyType || prop.property_type || 'residential';
+            let type: 'Residential' | 'Commercial' | 'Mixed Use' = 'Residential';
+            if (propertyType === 'commercial') {
+              type = 'Commercial';
+            } else if (propertyType === 'mixed') {
+              type = 'Mixed Use';
+            }
+
+            // Support both camelCase (Drizzle) and snake_case (legacy)
+            const pricePerShare = prop.pricePerShare || prop.price_per_share || '0';
+            const totalValuation = prop.totalValuation || prop.total_valuation || '0';
+            const expectedAnnualYield = prop.expectedAnnualYield || prop.expected_annual_yield || '0';
+
+            const mappedProperty: Property = {
+              id: prop.id,
+              title: prop.name || prop.title || 'Untitled Property',
+              location: prop.address || prop.location || 'Unknown Location',
+              type: type,
+              status: status,
+              image: image,
+              progress: progress,
+              targetReturn: parseFloat(String(expectedAnnualYield)) || 0,
+              minInvest: `₮ ${parseFloat(String(pricePerShare)).toLocaleString()}`,
+              isFavorite: false,
+              description: prop.description || '',
+              latitude: prop.latitude,
+              longitude: prop.longitude,
+              financials: {
+                totalValue: `₮ ${parseFloat(String(totalValuation)).toLocaleString()}`,
+                sharePrice: `₮ ${parseFloat(String(pricePerShare)).toLocaleString()}`,
+                projectedYield: `${parseFloat(String(expectedAnnualYield)) || 0}%`,
+                occupancyRate: prop.status === 'fully_funded' ? '100%' : 'Pre-lease'
+              }
+            };
+
+            setProperty(mappedProperty);
+          }
+        } catch (error) {
+          console.error('Error fetching property:', error);
+        } finally {
+          setLoadingProperty(false);
+        }
+      };
+
+      fetchProperty();
+    }, [id, properties]);
+
+    if (loadingProperty) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="max-w-4xl w-full mx-auto px-4">
+            <div className="bg-white dark:bg-charcoal rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-800 animate-pulse">
+              <div className="h-96 bg-gray-200 dark:bg-gray-700"></div>
+              <div className="p-8 space-y-4">
+                <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
+                <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
+                <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="h-20 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                  <div className="h-20 bg-gray-200 dark:bg-gray-700 rounded"></div>
                 </div>
               </div>
             </div>
           </div>
-        ) : (
+        </div>
+      );
+    }
+
+    if (!property) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
           <div className="text-center">
             <p className="text-gray-600 dark:text-gray-400 text-lg">Property not found</p>
             <button
@@ -328,9 +434,11 @@ const MainContent: React.FC = () => {
               Back to Marketplace
             </button>
           </div>
-        )}
-      </div>
-    );
+        </div>
+      );
+    }
+
+    return <PropertyDetails property={property} onNavigate={handleNavigate} />;
   };
 
   // Helper function to determine current view for navbar

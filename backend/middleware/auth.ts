@@ -119,6 +119,7 @@ export async function authenticate(
 /**
  * KYC verification middleware
  * Ensures user has completed KYC before accessing certain endpoints
+ * Allows 'pending' status (KYC submitted) and 'verified' status
  */
 export function requireKYC(
     req: Request,
@@ -133,10 +134,14 @@ export function requireKYC(
         return;
     }
 
-    if (req.user.kyc_status !== 'verified') {
+    // Allow access if KYC is pending (submitted) or verified
+    // Only block if KYC hasn't been started (null/undefined) or was rejected
+    if (!req.user.kyc_status || req.user.kyc_status === 'rejected') {
         res.status(403).json({
             success: false,
-            error: 'KYC verification required',
+            error: req.user.kyc_status === 'rejected' 
+                ? 'KYC verification was rejected. Please resubmit your documents.'
+                : 'KYC verification required. Please complete your KYC verification to continue.',
             code: 'KYC_NOT_VERIFIED'
         });
         return;
