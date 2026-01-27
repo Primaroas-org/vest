@@ -8,10 +8,14 @@ interface Property {
   address: string;
   property_type: string;
   status: string;
-  total_valuation: string;
-  price_per_share: string;
-  available_shares: number;
-  total_shares: number;
+  total_valuation?: string;
+  totalValuation?: string;
+  price_per_share?: string;
+  pricePerShare?: string;
+  available_shares?: number;
+  availableShares?: number;
+  total_shares?: number;
+  totalShares?: number;
 }
 
 const AdminProperties: React.FC = () => {
@@ -97,8 +101,10 @@ const AdminProperties: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {properties.map((property) => {
-          const progress = property.total_shares > 0
-            ? Math.round(((property.total_shares - property.available_shares) / property.total_shares) * 100)
+          const totalShares = property.total_shares || (property as any).totalShares || 1;
+          const availableShares = property.available_shares || (property as any).availableShares || 0;
+          const progress = totalShares > 0
+            ? Math.round(((totalShares - availableShares) / totalShares) * 100)
             : 0;
 
           return (
@@ -125,11 +131,15 @@ const AdminProperties: React.FC = () => {
                 <div className="space-y-2 mb-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500 dark:text-gray-400">Total Value</span>
-                    <span className="font-bold text-charcoal dark:text-white">₮{parseFloat(property.total_valuation || '0').toLocaleString()}</span>
+                    <span className="font-bold text-charcoal dark:text-white">
+                      ₮{parseFloat(String(property.total_valuation || property.totalValuation || '0')).toLocaleString()}
+                    </span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500 dark:text-gray-400">Share Price</span>
-                    <span className="font-bold text-charcoal dark:text-white">₮{parseFloat(property.price_per_share || '0').toLocaleString()}</span>
+                    <span className="font-bold text-charcoal dark:text-white">
+                      ₮{parseFloat(String(property.price_per_share || property.pricePerShare || '0')).toLocaleString()}
+                    </span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500 dark:text-gray-400">Progress</span>
@@ -145,16 +155,23 @@ const AdminProperties: React.FC = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <select
-                    value={property.status}
-                    onChange={(e) => handleStatusChange(property.id, e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 text-charcoal dark:text-white rounded-lg text-xs font-bold border border-gray-200 dark:border-gray-600"
-                  >
-                    <option value="draft">Draft</option>
-                    <option value="active">Active</option>
-                    <option value="fully_funded">Fully Funded</option>
-                    <option value="closed">Closed</option>
-                  </select>
+                  <div className="flex items-center gap-2 mb-1">
+                    <select
+                      value={property.status}
+                      onChange={(e) => handleStatusChange(property.id, e.target.value)}
+                      className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 text-charcoal dark:text-white rounded-lg text-xs font-bold border border-gray-200 dark:border-gray-600"
+                    >
+                      <option value="draft">Draft (Hidden from marketplace)</option>
+                      <option value="active">Active (Visible on marketplace)</option>
+                      <option value="fully_funded">Fully Funded (Visible on marketplace)</option>
+                      <option value="closed">Closed (Hidden from marketplace)</option>
+                    </select>
+                  </div>
+                  {property.status === 'draft' && (
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 px-2 py-1 rounded">
+                      ⚠️ Draft properties are not visible on the marketplace. Change to "Active" to make it visible.
+                    </p>
+                  )}
                   <div className="flex gap-2">
                     <button
                       onClick={() => navigate(`/property/${property.id}`)}

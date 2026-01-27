@@ -35,6 +35,11 @@ const AdminKYC: React.FC = () => {
         if (response.ok) {
           const data = await response.json();
           if (data.success && data.data) {
+            console.log('KYC submissions data:', data.data);
+            // Log first submission's kyc_data structure for debugging
+            if (data.data.length > 0) {
+              console.log('First submission kyc_data:', JSON.stringify(data.data[0].kyc_data, null, 2));
+            }
             setSubmissions(data.data);
           }
         }
@@ -300,15 +305,34 @@ const AdminKYC: React.FC = () => {
                 <div>
                   <p className="text-sm font-bold text-gray-500 dark:text-gray-400 mb-2">Documents</p>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {viewingSubmission.kyc_data.front_document && (
+                    {(viewingSubmission.kyc_data.front_document || viewingSubmission.kyc_data.front_document_url) && (
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Front Document</p>
                         <div className="relative group">
                           <img 
-                            src={viewingSubmission.kyc_data.front_document} 
+                            src={viewingSubmission.kyc_data.front_document || viewingSubmission.kyc_data.front_document_url} 
                             alt="Front document" 
                             className="w-full h-48 object-cover rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90 transition-opacity"
-                            onClick={() => window.open(viewingSubmission.kyc_data.front_document, '_blank')}
+                            onClick={() => window.open(viewingSubmission.kyc_data.front_document || viewingSubmission.kyc_data.front_document_url, '_blank')}
+                            referrerPolicy="no-referrer"
+                            onError={(e) => {
+                              const img = e.target as HTMLImageElement;
+                              const url = viewingSubmission.kyc_data.front_document || viewingSubmission.kyc_data.front_document_url;
+                              console.error('Error loading front document:', url);
+                              // Show error message instead of hiding
+                              if (!img.parentElement?.querySelector('.error-fallback')) {
+                                img.style.display = 'none';
+                                const errorDiv = document.createElement('div');
+                                errorDiv.className = 'error-fallback w-full h-48 flex items-center justify-center bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg';
+                                errorDiv.innerHTML = `
+                                  <div class="text-center p-4">
+                                    <p class="text-xs text-red-600 dark:text-red-400 mb-2">Failed to load image</p>
+                                    <a href="${url}" target="_blank" class="text-xs text-primary hover:underline">Open in new tab</a>
+                                  </div>
+                                `;
+                                img.parentElement?.appendChild(errorDiv);
+                              }
+                            }}
                           />
                           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-lg flex items-center justify-center">
                             <Eye className="size-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -316,15 +340,33 @@ const AdminKYC: React.FC = () => {
                         </div>
                       </div>
                     )}
-                    {viewingSubmission.kyc_data.back_document && (
+                    {(viewingSubmission.kyc_data.back_document || viewingSubmission.kyc_data.back_document_url) && (
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Back Document</p>
                         <div className="relative group">
                           <img 
-                            src={viewingSubmission.kyc_data.back_document} 
+                            src={viewingSubmission.kyc_data.back_document || viewingSubmission.kyc_data.back_document_url} 
                             alt="Back document" 
                             className="w-full h-48 object-cover rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90 transition-opacity"
-                            onClick={() => window.open(viewingSubmission.kyc_data.back_document, '_blank')}
+                            onClick={() => window.open(viewingSubmission.kyc_data.back_document || viewingSubmission.kyc_data.back_document_url, '_blank')}
+                            referrerPolicy="no-referrer"
+                            onError={(e) => {
+                              const img = e.target as HTMLImageElement;
+                              const url = viewingSubmission.kyc_data.back_document || viewingSubmission.kyc_data.back_document_url;
+                              console.error('Error loading back document:', url);
+                              if (!img.parentElement?.querySelector('.error-fallback')) {
+                                img.style.display = 'none';
+                                const errorDiv = document.createElement('div');
+                                errorDiv.className = 'error-fallback w-full h-48 flex items-center justify-center bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg';
+                                errorDiv.innerHTML = `
+                                  <div class="text-center p-4">
+                                    <p class="text-xs text-red-600 dark:text-red-400 mb-2">Failed to load image</p>
+                                    <a href="${url}" target="_blank" class="text-xs text-primary hover:underline">Open in new tab</a>
+                                  </div>
+                                `;
+                                img.parentElement?.appendChild(errorDiv);
+                              }
+                            }}
                           />
                           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-lg flex items-center justify-center">
                             <Eye className="size-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -332,15 +374,33 @@ const AdminKYC: React.FC = () => {
                         </div>
                       </div>
                     )}
-                    {viewingSubmission.kyc_data.selfie && (
+                    {(viewingSubmission.kyc_data.selfie || viewingSubmission.kyc_data.selfie_url) && (
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Selfie</p>
                         <div className="relative group">
                           <img 
-                            src={viewingSubmission.kyc_data.selfie} 
+                            src={viewingSubmission.kyc_data.selfie || viewingSubmission.kyc_data.selfie_url} 
                             alt="Selfie" 
                             className="w-full h-48 object-cover rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90 transition-opacity"
-                            onClick={() => window.open(viewingSubmission.kyc_data.selfie, '_blank')}
+                            onClick={() => window.open(viewingSubmission.kyc_data.selfie || viewingSubmission.kyc_data.selfie_url, '_blank')}
+                            referrerPolicy="no-referrer"
+                            onError={(e) => {
+                              const img = e.target as HTMLImageElement;
+                              const url = viewingSubmission.kyc_data.selfie || viewingSubmission.kyc_data.selfie_url;
+                              console.error('Error loading selfie:', url);
+                              if (!img.parentElement?.querySelector('.error-fallback')) {
+                                img.style.display = 'none';
+                                const errorDiv = document.createElement('div');
+                                errorDiv.className = 'error-fallback w-full h-48 flex items-center justify-center bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg';
+                                errorDiv.innerHTML = `
+                                  <div class="text-center p-4">
+                                    <p class="text-xs text-red-600 dark:text-red-400 mb-2">Failed to load image</p>
+                                    <a href="${url}" target="_blank" class="text-xs text-primary hover:underline">Open in new tab</a>
+                                  </div>
+                                `;
+                                img.parentElement?.appendChild(errorDiv);
+                              }
+                            }}
                           />
                           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-lg flex items-center justify-center">
                             <Eye className="size-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -349,8 +409,11 @@ const AdminKYC: React.FC = () => {
                       </div>
                     )}
                     {!viewingSubmission.kyc_data.front_document && 
+                     !viewingSubmission.kyc_data.front_document_url &&
                      !viewingSubmission.kyc_data.back_document && 
-                     !viewingSubmission.kyc_data.selfie && (
+                     !viewingSubmission.kyc_data.back_document_url &&
+                     !viewingSubmission.kyc_data.selfie && 
+                     !viewingSubmission.kyc_data.selfie_url && (
                       <p className="text-sm text-gray-500 dark:text-gray-400 col-span-3 text-center py-4">
                         No documents available
                       </p>

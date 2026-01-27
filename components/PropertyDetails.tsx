@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Property, ViewState } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Modal } from './Modal';
+import { InvestmentConfirmation } from './InvestmentConfirmation';
 
 interface PropertyDetailsProps {
   property: Property;
@@ -53,12 +54,42 @@ const openMap = (latitude: string | number | undefined, longitude: string | numb
 
 export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNavigate }) => {
   const { dict } = useLanguage();
-  const { user, isAuthenticated } = useAuth();
-  const [investmentAmount, setInvestmentAmount] = useState<string>(property.minInvest);
+  const { user, isAuthenticated, refreshUser } = useAuth();
+  
+  // Extract numeric value from minInvest and format it (remove currency symbol, keep commas)
+  const getInitialAmount = (): string => {
+    if (property.minInvest) {
+      const numericStr = property.minInvest.replace(/[₮,\s]/g, '');
+      const price = parseFloat(numericStr);
+      if (!isNaN(price) && price > 0) {
+        // Format with thousand separators
+        return price.toLocaleString();
+      }
+    }
+    return '';
+  };
+  
+  const [investmentAmount, setInvestmentAmount] = useState<string>(getInitialAmount());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showKYCModal, setShowKYCModal] = useState(false);
+  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
+  const [investmentData, setInvestmentData] = useState<{
+    transaction_id?: string;
+    shares: number;
+    price_per_share: string;
+    total_cost: string;
+    new_balance: string;
+  } | null>(null);
+  // Use ref to persist investment data across re-renders
+  const investmentDataRef = useRef<{
+    transaction_id?: string;
+    shares: number;
+    price_per_share: string;
+    total_cost: string;
+    new_balance: string;
+  } | null>(null);
 
   // Extract price per share from financials or minInvest
   const getPricePerShare = (): number => {
@@ -97,7 +128,8 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
 
   // Calculate estimated return
   const calculateEstimatedReturn = (): number => {
-    const amount = parseFloat(investmentAmount.replace(/,/g, '')) || 0;
+    const numericValue = investmentAmount.replace(/[₮,\s]/g, '');
+    const amount = parseFloat(numericValue) || 0;
     const shares = calculateShares(amount);
     const pricePerShare = getPricePerShare();
     const totalInvested = shares * pricePerShare;
@@ -128,7 +160,9 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
       return;
     }
 
-    const amount = parseFloat(investmentAmount.replace(/,/g, '')) || 0;
+    // Parse amount: remove commas and any currency symbols
+    const numericValue = investmentAmount.replace(/[₮,\s]/g, '');
+    const amount = parseFloat(numericValue) || 0;
     if (amount <= 0) {
       setError('Please enter a valid investment amount');
       return;
@@ -178,13 +212,32 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
         return;
       }
 
-      setSuccess(data.message || 'Investment successful!');
-      setLoading(false);
+      // Store investment data for confirmation modal
+      const pricePerShare = getPricePerShare();
+      // Calculate total cost from shares and price per share
+      const totalCost = shares * pricePerShare;
+      const transactionAmount = data.data?.transaction?.amount || totalCost.toString();
+      const investmentDataToStore = data.data ? {
+        transaction_id: data.data.transaction?.id || undefined,
+        shares: shares,
+        price_per_share: `₮ ${pricePerShare.toLocaleString()}`,
+        total_cost: `₮ ${parseFloat(transactionAmount).toLocaleString()}`,
+        new_balance: data.data.new_balance || '0.00'
+      } : {
+        shares: shares,
+        price_per_share: `₮ ${pricePerShare.toLocaleString()}`,
+        total_cost: `₮ ${totalCost.toLocaleString()}`,
+        new_balance: '0.00'
+      };
 
-      // Refresh page after 2 seconds to show updated data
-      setTimeout(() => {
-        window.location.reload();
-      }, 2000);
+      // Store in both state and ref to persist across re-renders
+      investmentDataRef.current = investmentDataToStore;
+      setInvestmentData(investmentDataToStore);
+      setLoading(false);
+      setShowConfirmationModal(true);
+
+      // Don't refresh user data here - it causes re-renders that can close the modal
+      // We'll refresh it when the modal closes instead
     } catch (err) {
       console.error('Investment error:', err);
       setError('An error occurred. Please try again.');
@@ -361,11 +414,6 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
                     {error}
                   </div>
                 )}
-                {success && (
-                  <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 px-4 py-3 rounded-xl text-sm">
-                    {success}
-                  </div>
-                )}
                 <label className="block text-sm font-bold text-gray-700 dark:text-gray-300">
                   {dict.details.enterAmount} (₮)
                 </label>
@@ -381,7 +429,7 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
                 </div>
                 {investmentAmount && (
                   <div className="text-xs text-gray-500 dark:text-gray-400">
-                    Shares: {calculateShares(parseFloat(investmentAmount.replace(/,/g, '')) || 0).toLocaleString()} shares
+                    Shares: {calculateShares(parseFloat(investmentAmount.replace(/[₮,\s]/g, '')) || 0).toLocaleString()} shares
                   </div>
                 )}
 
@@ -440,6 +488,48 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
         confirmText={dict.kyc.modalConfirm || 'Complete KYC'}
         cancelText={dict.kyc.modalCancel || 'Cancel'}
         type="confirm"
+      />
+
+      {/* Investment Confirmation Modal */}
+      <InvestmentConfirmation
+        isOpen={showConfirmationModal}
+        onClose={() => {
+          setShowConfirmationModal(false);
+          setInvestmentData(null);
+          investmentDataRef.current = null;
+          // Refresh user data after modal closes to update wallet balance
+          if (refreshUser) {
+            refreshUser().catch((refreshError) => {
+              console.error('Error refreshing user data:', refreshError);
+            });
+          }
+        }}
+        onViewPortfolio={() => {
+          setShowConfirmationModal(false);
+          setInvestmentData(null);
+          investmentDataRef.current = null;
+          // Refresh user data before navigating
+          if (refreshUser) {
+            refreshUser().catch((refreshError) => {
+              console.error('Error refreshing user data:', refreshError);
+            });
+          }
+          onNavigate('dashboard');
+        }}
+        onBrowseProperties={() => {
+          setShowConfirmationModal(false);
+          setInvestmentData(null);
+          investmentDataRef.current = null;
+          // Refresh user data before navigating
+          if (refreshUser) {
+            refreshUser().catch((refreshError) => {
+              console.error('Error refreshing user data:', refreshError);
+            });
+          }
+          onNavigate('marketplace');
+        }}
+        property={property}
+        investmentData={investmentData || investmentDataRef.current || undefined}
       />
     </div>
   );

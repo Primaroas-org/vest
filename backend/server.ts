@@ -1134,6 +1134,8 @@ app.get('/api/admin/kyc', authenticate, requireAdmin, async (req: Request, res: 
 
         const submissions = kycData.map((row: any) => {
             const kycData = row.kyc_data || {};
+            // Handle both old format (front_document, back_document, selfie) 
+            // and new format (front_document_url, back_document_url, selfie_url)
             return {
                 id: row.id,
                 user_id: row.id,
@@ -1145,9 +1147,9 @@ app.get('/api/admin/kyc', authenticate, requireAdmin, async (req: Request, res: 
                 kyc_data: {
                     rd_number: kycData.rd_number,
                     document_type: kycData.document_type,
-                    front_document: kycData.front_document,
-                    back_document: kycData.back_document,
-                    selfie: kycData.selfie
+                    front_document: kycData.front_document || kycData.front_document_url || null,
+                    back_document: kycData.back_document || kycData.back_document_url || null,
+                    selfie: kycData.selfie || kycData.selfie_url || null
                 },
                 created_at: row.created_at,
                 kyc_verified_at: row.kyc_verified_at

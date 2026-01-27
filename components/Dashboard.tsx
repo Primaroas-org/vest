@@ -1570,26 +1570,46 @@ const TransactionsView: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                         {transactions.map((tx) => {
-                            const isPositive = tx.transaction_type === 'deposit' || tx.transaction_type === 'dividend' || tx.transaction_type === 'refund';
+                            // Handle both camelCase (Drizzle) and snake_case (legacy) field names
+                            const transactionType = tx.transaction_type || tx.transactionType;
+                            const amount = tx.amount;
+                            const createdAt = tx.createdAt || tx.created_at;
+                            const status = tx.status;
+                            
+                            const isPositive = transactionType === 'deposit' || transactionType === 'dividend' || transactionType === 'refund';
+                            
+                            // Format date safely
+                            const formatDate = (dateValue: string | Date | null | undefined): string => {
+                                if (!dateValue) return 'N/A';
+                                try {
+                                    const date = new Date(dateValue);
+                                    if (isNaN(date.getTime())) return 'N/A';
+                                    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+                                } catch (error) {
+                                    console.error('Error formatting date:', dateValue, error);
+                                    return 'N/A';
+                                }
+                            };
+                            
                             return (
                                 <tr key={tx.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                                    <td className="px-8 py-4 font-bold text-gray-900 dark:text-white">{formatTransactionType(tx.transaction_type)}</td>
+                                    <td className="px-8 py-4 font-bold text-gray-900 dark:text-white">{formatTransactionType(transactionType)}</td>
                                     <td className={`px-8 py-4 font-bold ${isPositive ? 'text-emerald-500 dark:text-emerald-400' : 'text-gray-900 dark:text-white'}`}>
-                                        {formatAmount(tx.transaction_type, parseFloat(tx.amount))}
+                                        {formatAmount(transactionType, parseFloat(amount))}
                                     </td>
                                     <td className="px-8 py-4 text-gray-600 dark:text-gray-400 text-sm">
-                                        {new Date(tx.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                                        {formatDate(createdAt)}
                                     </td>
                                     <td className="px-8 py-4">
-                                        <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${tx.status === 'completed'
+                                        <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${status === 'completed'
                                             ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300'
-                                            : tx.status === 'pending'
+                                            : status === 'pending'
                                                 ? 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300'
                                                 : 'bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300'
                                             }`}>
-                                            {tx.status === 'completed'
+                                            {status === 'completed'
                                                 ? dict.dashboard.transactions.completed
-                                                : tx.status === 'pending'
+                                                : status === 'pending'
                                                     ? dict.dashboard.transactions.pending
                                                     : 'Failed'}
                                         </span>

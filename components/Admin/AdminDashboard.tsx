@@ -178,7 +178,18 @@ const AdminDashboard: React.FC = () => {
                       User invested ₮{parseFloat(activity.amount || '0').toLocaleString()}
                     </p>
                     <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
-                      {new Date(activity.created_at).toLocaleString()}
+                      {(() => {
+                        // Handle both camelCase (Drizzle) and snake_case (legacy) field names
+                        const createdAt = activity.createdAt || activity.created_at;
+                        if (!createdAt) return 'N/A';
+                        try {
+                          const date = new Date(createdAt);
+                          if (isNaN(date.getTime())) return 'N/A';
+                          return date.toLocaleString();
+                        } catch (error) {
+                          return 'N/A';
+                        }
+                      })()}
                     </p>
                   </div>
                 </div>

@@ -32,21 +32,39 @@ const AdminTransactions: React.FC = () => {
         if (response.ok) {
           const data = await response.json();
           if (data.success && data.data) {
-            const mappedTransactions: Transaction[] = data.data.map((tx: any) => ({
-              id: tx.id,
-              transaction_id: `#TRX-${tx.id.slice(-4).toUpperCase()}`,
-              asset: tx.property?.name || tx.description || 'N/A',
-              user: tx.user?.full_name || tx.user?.email || 'Unknown',
-              amount: `₮${parseFloat(tx.amount || '0').toLocaleString()}`,
-              type: tx.transaction_type === 'withdrawal' ? 'Withdrawal' : tx.transaction_type === 'investment' ? 'Investment' : tx.transaction_type === 'dividend' ? 'Dividend' : 'Deposit',
-              date: new Date(tx.created_at).toLocaleString('en-US', { 
-                month: 'short', 
-                day: 'numeric', 
-                hour: '2-digit', 
-                minute: '2-digit' 
-              }),
-              status: tx.status === 'completed' ? 'Completed' : tx.status === 'pending' ? 'Processing' : 'Failed'
-            }));
+            const mappedTransactions: Transaction[] = data.data.map((tx: any) => {
+              // Handle both camelCase (Drizzle) and snake_case (legacy) field names
+              const createdAt = tx.createdAt || tx.created_at;
+              
+              // Format date safely
+              const formatDate = (dateValue: string | Date | null | undefined): string => {
+                if (!dateValue) return 'N/A';
+                try {
+                  const date = new Date(dateValue);
+                  if (isNaN(date.getTime())) return 'N/A';
+                  return date.toLocaleString('en-US', { 
+                    month: 'short', 
+                    day: 'numeric', 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  });
+                } catch (error) {
+                  console.error('Error formatting date:', dateValue, error);
+                  return 'N/A';
+                }
+              };
+
+              return {
+                id: tx.id,
+                transaction_id: `#TRX-${tx.id.slice(-4).toUpperCase()}`,
+                asset: tx.property?.name || tx.description || 'N/A',
+                user: tx.user?.full_name || tx.user?.fullName || tx.user?.email || 'Unknown',
+                amount: `₮${parseFloat(tx.amount || '0').toLocaleString()}`,
+                type: tx.transaction_type === 'withdrawal' ? 'Withdrawal' : tx.transaction_type === 'investment' ? 'Investment' : tx.transaction_type === 'dividend' ? 'Dividend' : 'Deposit',
+                date: formatDate(createdAt),
+                status: tx.status === 'completed' ? 'Completed' : tx.status === 'pending' ? 'Processing' : 'Failed'
+              };
+            });
             setTransactions(mappedTransactions);
           }
         }

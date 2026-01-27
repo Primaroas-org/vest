@@ -157,9 +157,33 @@ const AdminInvestors: React.FC = () => {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                         <button className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-charcoal dark:text-white" title="Email"><Mail size={16}/></button>
-                         <button className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-charcoal dark:text-white" title="Call"><Phone size={16}/></button>
-                         <button className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-charcoal dark:text-white"><MoreHorizontal size={16}/></button>
+                         <button 
+                           onClick={() => window.location.href = `mailto:${inv.email}`}
+                           className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-charcoal dark:text-white transition-colors" 
+                           title="Email"
+                         >
+                           <Mail size={16}/>
+                         </button>
+                         <button 
+                           onClick={() => {
+                             // Try to get phone from user data, or show a message
+                             alert(`Call functionality would open dialer for ${inv.email}. Phone number not available in current data.`);
+                           }}
+                           className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-charcoal dark:text-white transition-colors" 
+                           title="Call"
+                         >
+                           <Phone size={16}/>
+                         </button>
+                         <button 
+                           onClick={() => {
+                             // More options menu - could show dropdown with view profile, view investments, etc.
+                             alert(`More options for ${inv.name}`);
+                           }}
+                           className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-charcoal dark:text-white transition-colors"
+                           title="More options"
+                         >
+                           <MoreHorizontal size={16}/>
+                         </button>
                       </div>
                     </td>
                   </tr>

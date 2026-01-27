@@ -118,21 +118,44 @@ export async function invest(req: any, res: any): Promise<void> {
         }
 
         // 6. Perform atomic transaction using Supabase RPC function
-        // We'll create a stored procedure for this
+        // Note: Supabase RPC accepts strings for NUMERIC types, which it will convert
+        // Verify we're using service role key (required for RPC functions)
+        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+        if (serviceKey && !serviceKey.startsWith('eyJ')) {
+            console.warn('[Investment] WARNING: Using non-JWT key for RPC call. RPC functions require service role key (JWT starting with "eyJ").');
+        }
+
+        const rpcParams = {
+            p_user_id: user.id,
+            p_property_id: property_id,
+            p_shares: shares,
+            p_price_per_share: dbProperty.pricePerShare, // Pass as string, Supabase converts to NUMERIC
+            p_total_cost: totalCost // Pass as string, Supabase converts to NUMERIC
+        };
+
+        console.log('[Investment] Calling process_investment with params:', {
+            p_user_id: rpcParams.p_user_id.substring(0, 8) + '...',
+            p_property_id: rpcParams.p_property_id.substring(0, 8) + '...',
+            p_shares: rpcParams.p_shares,
+            p_price_per_share: rpcParams.p_price_per_share,
+            p_total_cost: rpcParams.p_total_cost
+        });
+
         const { data: result, error: transactionError } = await supabase
-            .rpc('process_investment', {
-                p_user_id: user.id,
-                p_property_id: property_id,
-                p_shares: shares,
-                p_price_per_share: dbProperty.pricePerShare,
-                p_total_cost: totalCost
-            });
+            .rpc('process_investment', rpcParams);
 
         if (transactionError) {
-            console.error('Investment transaction error:', transactionError);
+            // Log full error details for debugging (server-side only)
+            console.error('[Investment] Transaction error details:', {
+                message: transactionError.message,
+                details: transactionError.details,
+                hint: transactionError.hint,
+                code: transactionError.code,
+                fullError: JSON.stringify(transactionError, null, 2)
+            });
 
-            // Handle specific errors
-            if (transactionError.message.includes('SOLD_OUT')) {
+            // Handle specific errors with user-friendly messages
+            if (transactionError.message?.includes('SOLD_OUT') || transactionError.message?.includes('sold out')) {
                 res.status(400).json({
                     success: false,
                     error: 'Property shares sold out during transaction',
@@ -141,7 +164,7 @@ export async function invest(req: any, res: any): Promise<void> {
                 return;
             }
 
-            if (transactionError.message.includes('INSUFFICIENT_FUNDS')) {
+            if (transactionError.message?.includes('INSUFFICIENT_FUNDS') || transactionError.message?.includes('insufficient funds')) {
                 res.status(400).json({
                     success: false,
                     error: 'Insufficient funds',
@@ -150,9 +173,10 @@ export async function invest(req: any, res: any): Promise<void> {
                 return;
             }
 
+            // Return generic error message to user (hide technical RLS/database errors)
             res.status(500).json({
                 success: false,
-                error: 'Investment transaction failed'
+                error: 'Investment transaction failed. Please try again or contact support if the issue persists.'
             } as ErrorResponse);
             return;
         }
@@ -226,10 +250,15 @@ export async function invest(req: any, res: any): Promise<void> {
         } as InvestResponse);
 
     } catch (error) {
-        console.error('Investment error:', error);
+        console.error('[Investment] Unexpected error:', error);
+        if (error instanceof Error) {
+            console.error('[Investment] Error message:', error.message);
+            console.error('[Investment] Error stack:', error.stack);
+        }
         res.status(500).json({
             success: false,
-            error: 'An error occurred while processing your investment'
+            error: 'An error occurred while processing your investment',
+            details: error instanceof Error ? error.message : 'Unknown error'
         } as ErrorResponse);
     }
 }

@@ -13,6 +13,8 @@ CREATE OR REPLACE FUNCTION process_investment(
 )
 RETURNS JSON
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
     v_user_balance NUMERIC(20, 2);
@@ -143,6 +145,8 @@ CREATE OR REPLACE FUNCTION distribute_rental_income(
 )
 RETURNS JSON
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
     v_investment RECORD;
@@ -242,6 +246,8 @@ CREATE OR REPLACE FUNCTION add_wallet_funds(
 )
 RETURNS JSON
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
     v_current_balance NUMERIC(20, 2);
