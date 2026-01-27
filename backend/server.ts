@@ -15,7 +15,7 @@ import { authenticate, requireKYC, requireAdmin } from './middleware/auth.js';
 import { invest } from './controllers/investment.controller.js';
 import { getPortfolio } from './controllers/portfolio.controller.js';
 import { distributeRent } from './controllers/admin.controller.js';
-import { submitKYC } from './controllers/kyc.controller.js';
+import { submitKYC, saveKYCProgress, getKYCProgress } from './controllers/kyc.controller.js';
 import {
     getDashboardStats,
     getAssets,
@@ -46,9 +46,12 @@ app.use(cors({
     credentials: true
 }));
 
-// Body parser middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body parser middleware - increased limit for KYC file uploads (base64 encoded images)
+const jsonLimit = '10mb';
+const urlEncodedLimit = '10mb';
+console.log(`[Server] Body parser limits set: JSON=${jsonLimit}, URL-encoded=${urlEncodedLimit}`);
+app.use(express.json({ limit: jsonLimit }));
+app.use(express.urlencoded({ extended: true, limit: urlEncodedLimit }));
 
 // Logging middleware
 app.use(morgan('combined'));
@@ -79,21 +82,15 @@ app.get('/health', (req: Request, res: Response) => {
 // Get all active properties
 app.get('/api/properties', async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase.js');
+        const { db } = await import('./db/index.js');
+        const { properties } = await import('./db/schema.js');
+        const { inArray, desc } = await import('drizzle-orm');
 
-        const { data, error } = await supabase
-            .from('properties')
-            .select('*')
-            .in('status', ['active', 'fully_funded'])
-            .order('created_at', { ascending: false });
-
-        if (error) {
-            res.status(500).json({
-                success: false,
-                error: 'Failed to fetch properties'
-            } as ErrorResponse);
-            return;
-        }
+        const data = await db
+            .select()
+            .from(properties)
+            .where(inArray(properties.status, ['active', 'fully_funded']))
+            .orderBy(desc(properties.createdAt));
 
         res.status(200).json({
             success: true,
@@ -111,15 +108,17 @@ app.get('/api/properties', async (req: Request, res: Response) => {
 // Get single property details
 app.get('/api/properties/:id', async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase.js');
+        const { db } = await import('./db/index.js');
+        const { properties } = await import('./db/schema.js');
+        const { eq } = await import('drizzle-orm');
 
-        const { data, error } = await supabase
-            .from('properties')
-            .select('*')
-            .eq('id', req.params.id)
-            .single();
+        const data = await db
+            .select()
+            .from(properties)
+            .where(eq(properties.id, req.params.id))
+            .limit(1);
 
-        if (error || !data) {
+        if (!data || data.length === 0) {
             res.status(404).json({
                 success: false,
                 error: 'Property not found'
@@ -129,7 +128,7 @@ app.get('/api/properties/:id', async (req: Request, res: Response) => {
 
         res.status(200).json({
             success: true,
-            data: data
+            data: data[0]
         });
     } catch (error) {
         console.error('Property fetch error:', error);
@@ -162,25 +161,33 @@ app.get('/api/user/me', authenticate, (req: Request, res: Response) => {
 // Get user transaction history
 app.get('/api/user/transactions', authenticate, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase.js');
+        const { db } = await import('./db/index.js');
+        const { transactions, properties } = await import('./db/schema.js');
+        const { eq, desc } = await import('drizzle-orm');
         const { page = 1, limit = 50 } = req.query;
 
         const offset = (Number(page) - 1) * Number(limit);
 
-        const { data, error, count } = await supabase
-            .from('transactions')
-            .select('*, property:properties(name)', { count: 'exact' })
-            .eq('user_id', req.user!.id)
-            .order('created_at', { ascending: false })
-            .range(offset, offset + Number(limit) - 1);
+        const data = await db.query.transactions.findMany({
+            where: eq(transactions.userId, req.user!.id),
+            with: {
+                property: {
+                    columns: {
+                        name: true,
+                    },
+                },
+            },
+            orderBy: desc(transactions.createdAt),
+            limit: Number(limit),
+            offset: offset,
+        });
 
-        if (error) {
-            res.status(500).json({
-                success: false,
-                error: 'Failed to fetch transactions'
-            } as ErrorResponse);
-            return;
-        }
+        // Get total count
+        const countResult = await db
+            .select()
+            .from(transactions)
+            .where(eq(transactions.userId, req.user!.id));
+        const count = countResult.length;
 
         res.status(200).json({
             success: true,
@@ -204,8 +211,20 @@ app.get('/api/user/transactions', authenticate, async (req: Request, res: Respon
 // KYC ROUTES (Require Authentication)
 // =====================================================
 
+// Save KYC progress (so user can resume later)
+app.post('/api/kyc/save-progress', authenticate, saveKYCProgress);
+
+// Get saved KYC progress
+app.get('/api/kyc/progress', authenticate, getKYCProgress);
+
 // Submit KYC documents
-app.post('/api/kyc/submit', authenticate, submitKYC);
+console.log('[Server] Registering KYC route: POST /api/kyc/submit');
+app.post('/api/kyc/submit', (req, res, next) => {
+    console.log('[KYC Route] Request received at /api/kyc/submit');
+    console.log('[KYC Route] Method:', req.method);
+    console.log('[KYC Route] Headers:', req.headers.authorization ? 'Authorization present' : 'No authorization');
+    next();
+}, authenticate, submitKYC);
 
 // =====================================================
 // INVESTMENT ROUTES (Require KYC)
@@ -245,31 +264,38 @@ app.get('/api/dashboard/asset-breakdown', authenticate, getAssetBreakdown);
 // Get user notifications
 app.get('/api/notifications', authenticate, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase.js');
+        const { db } = await import('./db/index.js');
+        const { notifications } = await import('./db/schema.js');
+        const { eq, and, desc } = await import('drizzle-orm');
         const userId = req.user!.id;
         const { unread_only = false } = req.query;
 
-        let query = supabase
-            .from('notifications')
-            .select('*')
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false })
+        let query = db
+            .select()
+            .from(notifications)
+            .where(eq(notifications.userId, userId))
+            .orderBy(desc(notifications.createdAt))
             .limit(50);
 
         if (unread_only === 'true') {
-            query = query.eq('is_read', false);
-        }
-
-        const { data, error } = await query;
-
-        if (error) {
-            console.error('Error fetching notifications:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to fetch notifications'
-            } as ErrorResponse);
+            const data = await db
+                .select()
+                .from(notifications)
+                .where(and(
+                    eq(notifications.userId, userId),
+                    eq(notifications.isRead, false)
+                ))
+                .orderBy(desc(notifications.createdAt))
+                .limit(50);
+            
+            res.status(200).json({
+                success: true,
+                data: data || []
+            });
             return;
         }
+
+        const data = await query;
 
         res.status(200).json({
             success: true,
@@ -287,30 +313,35 @@ app.get('/api/notifications', authenticate, async (req: Request, res: Response) 
 // Mark notification as read
 app.patch('/api/notifications/:id/read', authenticate, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase.js');
+        const { db } = await import('./db/index.js');
+        const { notifications } = await import('./db/schema.js');
+        const { eq, and } = await import('drizzle-orm');
         const userId = req.user!.id;
         const { id } = req.params;
 
-        const { data, error } = await supabase
-            .from('notifications')
-            .update({ is_read: true, read_at: new Date().toISOString() })
-            .eq('id', id)
-            .eq('user_id', userId)
-            .select()
-            .single();
+        const data = await db
+            .update(notifications)
+            .set({ 
+                isRead: true, 
+                readAt: new Date() 
+            })
+            .where(and(
+                eq(notifications.id, id),
+                eq(notifications.userId, userId)
+            ))
+            .returning();
 
-        if (error) {
-            console.error('Error updating notification:', error);
-            res.status(500).json({
+        if (!data || data.length === 0) {
+            res.status(404).json({
                 success: false,
-                error: 'Failed to update notification'
+                error: 'Notification not found'
             } as ErrorResponse);
             return;
         }
 
         res.status(200).json({
             success: true,
-            data: data
+            data: data[0]
         });
     } catch (error) {
         console.error('Notification update error:', error);
@@ -324,23 +355,21 @@ app.patch('/api/notifications/:id/read', authenticate, async (req: Request, res:
 // Mark all notifications as read
 app.patch('/api/notifications/read-all', authenticate, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase.js');
+        const { db } = await import('./db/index.js');
+        const { notifications } = await import('./db/schema.js');
+        const { eq, and } = await import('drizzle-orm');
         const userId = req.user!.id;
 
-        const { error } = await supabase
-            .from('notifications')
-            .update({ is_read: true, read_at: new Date().toISOString() })
-            .eq('user_id', userId)
-            .eq('is_read', false);
-
-        if (error) {
-            console.error('Error updating notifications:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to update notifications'
-            } as ErrorResponse);
-            return;
-        }
+        await db
+            .update(notifications)
+            .set({ 
+                isRead: true, 
+                readAt: new Date() 
+            })
+            .where(and(
+                eq(notifications.userId, userId),
+                eq(notifications.isRead, false)
+            ));
 
         res.status(200).json({
             success: true,
@@ -362,25 +391,19 @@ app.patch('/api/notifications/read-all', authenticate, async (req: Request, res:
 // Get user's saved cards
 app.get('/api/cards', authenticate, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase.js');
+        const { db } = await import('./db/index.js');
+        const { savedCards } = await import('./db/schema.js');
+        const { eq, and, desc } = await import('drizzle-orm');
         const userId = req.user!.id;
 
-        const { data, error } = await supabase
-            .from('saved_cards')
-            .select('*')
-            .eq('user_id', userId)
-            .eq('is_active', true)
-            .order('is_default', { ascending: false })
-            .order('created_at', { ascending: false });
-
-        if (error) {
-            console.error('Error fetching cards:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to fetch cards'
-            } as ErrorResponse);
-            return;
-        }
+        const data = await db
+            .select()
+            .from(savedCards)
+            .where(and(
+                eq(savedCards.userId, userId),
+                eq(savedCards.isActive, true)
+            ))
+            .orderBy(desc(savedCards.isDefault), desc(savedCards.createdAt));
 
         res.status(200).json({
             success: true,
@@ -398,7 +421,6 @@ app.get('/api/cards', authenticate, async (req: Request, res: Response) => {
 // Add a new saved card
 app.post('/api/cards', authenticate, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase.js');
         const userId = req.user!.id;
         const { bank_name, last_four_digits, card_holder_name, card_type, expiry_month, expiry_year, is_default } = req.body;
 
@@ -410,24 +432,26 @@ app.post('/api/cards', authenticate, async (req: Request, res: Response) => {
             return;
         }
 
-        const { data, error } = await supabase
-            .from('saved_cards')
-            .insert({
-                user_id: userId,
-                bank_name,
-                last_four_digits: last_four_digits.toString().slice(-4),
-                card_holder_name: card_holder_name || null,
-                card_type: card_type || 'debit',
-                expiry_month: expiry_month || null,
-                expiry_year: expiry_year || null,
-                is_default: is_default || false,
-                is_active: true
+        const { db } = await import('./db/index.js');
+        const { savedCards } = await import('./db/schema.js');
+        
+        const data = await db
+            .insert(savedCards)
+            .values({
+                userId: userId,
+                bankName: bank_name,
+                lastFourDigits: last_four_digits.toString().slice(-4),
+                cardHolderName: card_holder_name || null,
+                cardType: (card_type || 'debit') as any,
+                expiryMonth: expiry_month || null,
+                expiryYear: expiry_year || null,
+                isDefault: is_default || false,
+                isActive: true
             })
-            .select()
-            .single();
+            .returning();
 
-        if (error) {
-            console.error('Error creating card:', error);
+        if (!data || data.length === 0) {
+            console.error('Error creating card: No data returned');
             res.status(500).json({
                 success: false,
                 error: 'Failed to save card'
@@ -438,7 +462,7 @@ app.post('/api/cards', authenticate, async (req: Request, res: Response) => {
         res.status(201).json({
             success: true,
             message: 'Card saved successfully',
-            data: data
+            data: data[0]
         });
     } catch (error) {
         console.error('Card creation error:', error);
@@ -452,29 +476,33 @@ app.post('/api/cards', authenticate, async (req: Request, res: Response) => {
 // Update card (set as default, etc.)
 app.patch('/api/cards/:id', authenticate, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase.js');
+        const { db } = await import('./db/index.js');
+        const { savedCards } = await import('./db/schema.js');
+        const { eq, and } = await import('drizzle-orm');
         const userId = req.user!.id;
         const { id } = req.params;
-        const updates = req.body;
+        const updates: any = {};
+        
+        // Map snake_case to camelCase
+        if (req.body.bank_name) updates.bankName = req.body.bank_name;
+        if (req.body.last_four_digits) updates.lastFourDigits = req.body.last_four_digits;
+        if (req.body.card_holder_name !== undefined) updates.cardHolderName = req.body.card_holder_name;
+        if (req.body.card_type) updates.cardType = req.body.card_type;
+        if (req.body.expiry_month !== undefined) updates.expiryMonth = req.body.expiry_month;
+        if (req.body.expiry_year !== undefined) updates.expiryYear = req.body.expiry_year;
+        if (req.body.is_default !== undefined) updates.isDefault = req.body.is_default;
+        if (req.body.is_active !== undefined) updates.isActive = req.body.is_active;
 
-        const { data, error } = await supabase
-            .from('saved_cards')
-            .update(updates)
-            .eq('id', id)
-            .eq('user_id', userId)
-            .select()
-            .single();
+        const data = await db
+            .update(savedCards)
+            .set(updates)
+            .where(and(
+                eq(savedCards.id, id),
+                eq(savedCards.userId, userId)
+            ))
+            .returning();
 
-        if (error) {
-            console.error('Error updating card:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to update card'
-            } as ErrorResponse);
-            return;
-        }
-
-        if (!data) {
+        if (!data || data.length === 0) {
             res.status(404).json({
                 success: false,
                 error: 'Card not found'
@@ -485,7 +513,7 @@ app.patch('/api/cards/:id', authenticate, async (req: Request, res: Response) =>
         res.status(200).json({
             success: true,
             message: 'Card updated successfully',
-            data: data
+            data: data[0]
         });
     } catch (error) {
         console.error('Card update error:', error);
@@ -499,24 +527,19 @@ app.patch('/api/cards/:id', authenticate, async (req: Request, res: Response) =>
 // Delete a saved card
 app.delete('/api/cards/:id', authenticate, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase.js');
+        const { db } = await import('./db/index.js');
+        const { savedCards } = await import('./db/schema.js');
+        const { eq, and } = await import('drizzle-orm');
         const userId = req.user!.id;
         const { id } = req.params;
 
-        const { error } = await supabase
-            .from('saved_cards')
-            .update({ is_active: false })
-            .eq('id', id)
-            .eq('user_id', userId);
-
-        if (error) {
-            console.error('Error deleting card:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to delete card'
-            } as ErrorResponse);
-            return;
-        }
+        await db
+            .update(savedCards)
+            .set({ isActive: false })
+            .where(and(
+                eq(savedCards.id, id),
+                eq(savedCards.userId, userId)
+            ));
 
         res.status(200).json({
             success: true,
@@ -596,13 +619,17 @@ app.post('/api/wallet/withdraw', authenticate, async (req: Request, res: Respons
         }
 
         // Check user balance
-        const { data: userData, error: userError } = await supabase
-            .from('users')
-            .select('wallet_balance')
-            .eq('id', userId)
-            .single();
+        const { db } = await import('./db/index.js');
+        const { users, transactions } = await import('./db/schema.js');
+        const { eq } = await import('drizzle-orm');
+        
+        const userData = await db
+            .select({ walletBalance: users.walletBalance })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
 
-        if (userError || !userData) {
+        if (!userData || userData.length === 0) {
             res.status(404).json({
                 success: false,
                 error: 'User not found'
@@ -610,7 +637,7 @@ app.post('/api/wallet/withdraw', authenticate, async (req: Request, res: Respons
             return;
         }
 
-        const currentBalance = parseFloat(userData.wallet_balance);
+        const currentBalance = parseFloat(userData[0].walletBalance);
         const withdrawAmount = parseFloat(amount);
 
         if (currentBalance < withdrawAmount) {
@@ -625,45 +652,30 @@ app.post('/api/wallet/withdraw', authenticate, async (req: Request, res: Respons
         const newBalance = currentBalance - withdrawAmount;
 
         // Update user balance
-        const { error: updateError } = await supabase
-            .from('users')
-            .update({ wallet_balance: newBalance.toString() })
-            .eq('id', userId);
-
-        if (updateError) {
-            console.error('Withdrawal update error:', updateError);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to process withdrawal'
-            } as ErrorResponse);
-            return;
-        }
+        await db
+            .update(users)
+            .set({ walletBalance: newBalance.toString() })
+            .where(eq(users.id, userId));
 
         // Create transaction record
-        const { data: transaction, error: transactionError } = await supabase
-            .from('transactions')
-            .insert({
-                user_id: userId,
-                transaction_type: 'withdrawal',
+        const transaction = await db
+            .insert(transactions)
+            .values({
+                userId: userId,
+                transactionType: 'withdrawal',
                 amount: withdrawAmount.toString(),
-                balance_before: currentBalance.toString(),
-                balance_after: newBalance.toString(),
+                balanceBefore: currentBalance.toString(),
+                balanceAfter: newBalance.toString(),
                 description: description || 'Wallet withdrawal',
                 status: 'completed'
             })
-            .select()
-            .single();
-
-        if (transactionError) {
-            console.error('Transaction creation error:', transactionError);
-            // Rollback balance update would be ideal here, but for simplicity we'll continue
-        }
+            .returning();
 
         res.status(200).json({
             success: true,
             message: 'Funds withdrawn successfully',
             data: {
-                transaction_id: transaction?.id,
+                transaction_id: transaction[0]?.id,
                 new_balance: newBalance.toString()
             }
         });
@@ -686,7 +698,6 @@ app.post('/api/admin/distribute-rent', authenticate, requireAdmin, distributeRen
 // Create new property (admin only)
 app.post('/api/admin/properties', authenticate, requireAdmin, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase.js');
 
         const {
             name,
@@ -710,27 +721,29 @@ app.post('/api/admin/properties', authenticate, requireAdmin, async (req: Reques
             return;
         }
 
-        const { data, error } = await supabase
-            .from('properties')
-            .insert({
+        const { db } = await import('./db/index.js');
+        const { properties } = await import('./db/schema.js');
+        
+        const data = await db
+            .insert(properties)
+            .values({
                 name,
-                description,
+                description: description || null,
                 address,
-                property_type,
-                district,
-                total_valuation,
-                price_per_share,
-                total_shares,
-                available_shares: total_shares,
-                expected_annual_yield,
-                monthly_rent: monthly_rent || '0.00',
+                propertyType: property_type,
+                district: district || null,
+                totalValuation: total_valuation,
+                pricePerShare: price_per_share,
+                totalShares: total_shares,
+                availableShares: total_shares,
+                expectedAnnualYield: expected_annual_yield || null,
+                monthlyRent: monthly_rent || '0.00',
                 status: 'draft'
             })
-            .select()
-            .single();
+            .returning();
 
-        if (error) {
-            console.error('Property creation error:', error);
+        if (!data || data.length === 0) {
+            console.error('Property creation error: No data returned');
             res.status(500).json({
                 success: false,
                 error: 'Failed to create property'
@@ -741,7 +754,7 @@ app.post('/api/admin/properties', authenticate, requireAdmin, async (req: Reques
         res.status(201).json({
             success: true,
             message: 'Property created successfully',
-            data: data
+            data: data[0]
         });
     } catch (error) {
         console.error('Property creation error:', error);
@@ -755,7 +768,6 @@ app.post('/api/admin/properties', authenticate, requireAdmin, async (req: Reques
 // Update property status (admin only)
 app.patch('/api/admin/properties/:id/status', authenticate, requireAdmin, async (req: Request, res: Response) => {
     try {
-        const { supabase } = await import('./config/supabase.js');
         const { status } = req.body;
 
         if (!['draft', 'active', 'fully_funded', 'closed'].includes(status)) {
@@ -766,14 +778,17 @@ app.patch('/api/admin/properties/:id/status', authenticate, requireAdmin, async 
             return;
         }
 
-        const { data, error } = await supabase
-            .from('properties')
-            .update({ status })
-            .eq('id', req.params.id)
-            .select()
-            .single();
+        const { db } = await import('./db/index.js');
+        const { properties } = await import('./db/schema.js');
+        const { eq } = await import('drizzle-orm');
+        
+        const data = await db
+            .update(properties)
+            .set({ status: status as any })
+            .where(eq(properties.id, req.params.id))
+            .returning();
 
-        if (error || !data) {
+        if (!data || data.length === 0) {
             res.status(404).json({
                 success: false,
                 error: 'Property not found'

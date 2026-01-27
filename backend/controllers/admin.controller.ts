@@ -1,4 +1,7 @@
 import { supabase } from '../config/supabase.js';
+import { db } from '../db/index.js';
+import { properties, investments, transactions } from '../db/schema.js';
+import { eq, and, desc } from 'drizzle-orm';
 import { MNT } from '../utils/numeric.js';
 import type { DistributeRentRequest, DistributeRentResponse, ErrorResponse, Transaction } from '../types/index.js';
 
@@ -28,13 +31,13 @@ export async function distributeRent(req: any, res: any): Promise<void> {
         }
 
         // 1. Fetch property details
-        const { data: property, error: propertyError } = await supabase
-            .from('properties')
-            .select('*')
-            .eq('id', property_id)
-            .single();
+        const propertyResults = await db
+            .select()
+            .from(properties)
+            .where(eq(properties.id, property_id))
+            .limit(1);
 
-        if (propertyError || !property) {
+        if (!propertyResults || propertyResults.length === 0) {
             res.status(404).json({
                 success: false,
                 error: 'Property not found'
@@ -42,22 +45,17 @@ export async function distributeRent(req: any, res: any): Promise<void> {
             return;
         }
 
+        const property = propertyResults[0];
+
         // 2. Fetch all shareholders (investments) for this property
-        const { data: investments, error: investmentsError } = await supabase
-            .from('investments')
-            .select('*, user:users(id, full_name, wallet_balance)')
-            .eq('property_id', property_id);
+        const propertyInvestments = await db.query.investments.findMany({
+            where: eq(investments.propertyId, property_id),
+            with: {
+                user: true,
+            },
+        });
 
-        if (investmentsError) {
-            console.error('Investments fetch error:', investmentsError);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to fetch property shareholders'
-            } as ErrorResponse);
-            return;
-        }
-
-        if (!investments || investments.length === 0) {
+        if (!propertyInvestments || propertyInvestments.length === 0) {
             res.status(400).json({
                 success: false,
                 error: 'No shareholders found for this property'
@@ -66,7 +64,7 @@ export async function distributeRent(req: any, res: any): Promise<void> {
         }
 
         // 3. Calculate shares owned by investors vs total shares sold
-        const totalSharesSold = property.total_shares - property.available_shares;
+        const totalSharesSold = property.totalShares - property.availableShares;
 
         if (totalSharesSold === 0) {
             res.status(400).json({
@@ -94,23 +92,41 @@ export async function distributeRent(req: any, res: any): Promise<void> {
         }
 
         // 5. Fetch the created transactions
-        const { data: transactions } = await supabase
-            .from('transactions')
-            .select('*')
-            .eq('property_id', property_id)
-            .eq('transaction_type', 'dividend')
-            .order('created_at', { ascending: false })
-            .limit(investments.length);
+        const dividendTransactions = await db
+            .select()
+            .from(transactions)
+            .where(and(
+                eq(transactions.propertyId, property_id),
+                eq(transactions.transactionType, 'dividend')
+            ))
+            .orderBy(desc(transactions.createdAt))
+            .limit(propertyInvestments.length);
+
+        // Map transactions to expected format
+        const mappedTransactions: Transaction[] = dividendTransactions.map(tx => ({
+            id: tx.id,
+            user_id: tx.userId,
+            property_id: tx.propertyId || undefined,
+            transaction_type: tx.transactionType as any,
+            amount: tx.amount,
+            balance_before: tx.balanceBefore,
+            balance_after: tx.balanceAfter,
+            description: tx.description || undefined,
+            metadata: (tx.metadata as Record<string, any>) || {},
+            status: tx.status as any,
+            created_at: tx.createdAt,
+            related_transaction_id: tx.relatedTransactionId || undefined,
+        }));
 
         res.status(200).json({
             success: true,
-            message: `Successfully distributed ${MNT.format(total_rent)} to ${investments.length} shareholders`,
+            message: `Successfully distributed ${MNT.format(total_rent)} to ${propertyInvestments.length} shareholders`,
             data: {
                 property_id: property.id,
                 property_name: property.name,
                 total_rent: total_rent,
-                shareholders_count: investments.length,
-                transactions: transactions as Transaction[]
+                shareholders_count: propertyInvestments.length,
+                transactions: mappedTransactions
             }
         } as DistributeRentResponse);
 

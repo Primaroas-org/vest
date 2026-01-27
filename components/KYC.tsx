@@ -13,10 +13,84 @@ export const KYCEntry: React.FC<KYCProps> = ({ onNavigate }) => {
   const { dict } = useLanguage();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [loading, setLoading] = React.useState(true);
+  const [lastStep, setLastStep] = React.useState<string | null>(null);
+
+  // Load saved progress on mount
+  React.useEffect(() => {
+    const loadProgress = async () => {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('supabase.auth.token');
+        if (!token) {
+          setLoading(false);
+          return;
+        }
+
+        const response = await fetch('/api/kyc/progress', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('[KYC Entry] Progress data:', data);
+          if (data.success && data.data.has_progress && data.data.last_step) {
+            console.log('[KYC Entry] Found saved progress, last step:', data.data.last_step);
+            setLastStep(data.data.last_step);
+            // Auto-redirect to last step if progress exists
+            const lastStep = data.data.last_step;
+            if (lastStep === 'rd-number') {
+              navigate('/kyc/rd-number');
+            } else if (lastStep === 'document-upload') {
+              navigate('/kyc/verify');
+            } else if (lastStep === 'selfie') {
+              navigate('/kyc/selfie');
+            }
+          } else {
+            console.log('[KYC Entry] No saved progress found');
+          }
+        } else {
+          console.error('[KYC Entry] Failed to load progress:', response.status, response.statusText);
+        }
+      } catch (error) {
+        console.error('Error loading KYC progress:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadProgress();
+  }, [user]);
 
   const handleStartVerification = () => {
-    navigate('/kyc/rd-number');
+    // Resume from last step if available
+    if (lastStep === 'rd-number') {
+      navigate('/kyc/rd-number');
+    } else if (lastStep === 'document-upload') {
+      navigate('/kyc/verify');
+    } else if (lastStep === 'selfie') {
+      navigate('/kyc/selfie');
+    } else {
+      navigate('/kyc/rd-number');
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-gray-500 dark:text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark py-20 px-4 relative overflow-hidden">
@@ -32,10 +106,13 @@ export const KYCEntry: React.FC<KYCProps> = ({ onNavigate }) => {
             <span className="material-icons-round text-white text-3xl">verified_user</span>
           </div>
           <h2 className="text-3xl font-extrabold text-charcoal dark:text-white font-display mb-2">
-            {dict.kyc.title}
+            {lastStep ? (dict.kyc.resumeVerification || 'Resume Verification') : dict.kyc.title}
           </h2>
           <p className="text-gray-500 dark:text-gray-400">
-            {dict.kyc.subtitle}
+            {lastStep 
+              ? (dict.kyc.resumeMessage || 'You have saved progress. Continue from where you left off.')
+              : dict.kyc.subtitle
+            }
           </p>
         </div>
 
@@ -80,11 +157,11 @@ export const KYCEntry: React.FC<KYCProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* Start Button */}
+        {/* Start/Continue Button */}
         <button
           onClick={handleStartVerification}
           className="w-full bg-primary hover:bg-emerald-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/25 transition-all active:scale-95 flex items-center justify-center gap-2">
-          <span>{dict.kyc.startButton}</span>
+          <span>{lastStep ? (dict.kyc.continueVerification || 'Continue Verification') : (dict.kyc.startVerification || 'Start Verification')}</span>
           <span className="material-icons-round">arrow_forward</span>
         </button>
 
@@ -108,9 +185,54 @@ export const KYCEntry: React.FC<KYCProps> = ({ onNavigate }) => {
 export const KYCRDNumber: React.FC<KYCProps> = ({ onNavigate }) => {
   const { dict } = useLanguage();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [letters, setLetters] = useState('');
   const [digits, setDigits] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
+
+  // Load saved progress on mount
+  React.useEffect(() => {
+    const loadProgress = async () => {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('supabase.auth.token');
+        if (!token) {
+          setLoading(false);
+          return;
+        }
+
+        const response = await fetch('/api/kyc/progress', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.data.progress['rd-number']?.rd_number) {
+            const savedRD = data.data.progress['rd-number'].rd_number;
+            if (savedRD && savedRD.length === 10) {
+              setLetters(savedRD.substring(0, 2));
+              setDigits(savedRD.substring(2));
+              // Also restore to sessionStorage for submission
+              sessionStorage.setItem('kyc_rd_number', savedRD);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading KYC progress:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadProgress();
+  }, [user]);
 
   const handleLettersChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/[^А-ЯЁ]/gi, '').toUpperCase().slice(0, 2);
@@ -124,7 +246,7 @@ export const KYCRDNumber: React.FC<KYCProps> = ({ onNavigate }) => {
     setError(null);
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (letters.length !== 2) {
       setError(dict.kyc.rdLettersRequired || 'Please enter 2 Cyrillic letters');
       return;
@@ -133,14 +255,54 @@ export const KYCRDNumber: React.FC<KYCProps> = ({ onNavigate }) => {
       setError(dict.kyc.rdDigitsRequired || 'Please enter 8 digits');
       return;
     }
+    
     // Store RD number in sessionStorage for submission
     const rdNumber = `${letters}${digits}`;
     sessionStorage.setItem('kyc_rd_number', rdNumber);
+
+    // Save progress to database
+    try {
+      const token = localStorage.getItem('supabase.auth.token');
+      if (token) {
+        const saveResponse = await fetch('/api/kyc/save-progress', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            step: 'rd-number',
+            data: { rd_number: rdNumber }
+          })
+        });
+        
+        if (saveResponse.ok) {
+          console.log('[KYC RD Number] Progress saved successfully');
+        } else {
+          console.error('[KYC RD Number] Failed to save progress:', saveResponse.status);
+        }
+      }
+    } catch (error) {
+      console.error('[KYC RD Number] Error saving KYC progress:', error);
+      // Continue even if save fails
+    }
+
     // Navigate to document upload (step 3)
     navigate('/kyc/verify');
   };
 
   const canContinue = letters.length === 2 && digits.length === 8;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-gray-500 dark:text-gray-400">Loading your progress...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark py-20 px-4 relative overflow-hidden">
@@ -283,15 +445,89 @@ export const KYCRDNumber: React.FC<KYCProps> = ({ onNavigate }) => {
 export const KYCDocumentUpload: React.FC<KYCProps> = ({ onNavigate }) => {
   const { dict } = useLanguage();
   const navigate = useNavigate();
-  const [documentType, setDocumentType] = useState('mn_id');
+  const { user } = useAuth();
+  const [documentType, setDocumentType] = useState<'mn_id' | 'passport'>('mn_id');
   const [frontFile, setFrontFile] = useState<File | null>(null);
   const [backFile, setBackFile] = useState<File | null>(null);
   const [frontPreview, setFrontPreview] = useState<string | null>(null);
   const [backPreview, setBackPreview] = useState<string | null>(null);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [loading, setLoading] = React.useState(true);
   const frontInputRef = useRef<HTMLInputElement>(null);
   const backInputRef = useRef<HTMLInputElement>(null);
+
+  // Load saved progress on mount
+  React.useEffect(() => {
+    const loadProgress = async () => {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('supabase.auth.token');
+        if (!token) {
+          setLoading(false);
+          return;
+        }
+
+        const response = await fetch('/api/kyc/progress', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const progress = data.data?.progress?.['document-upload'];
+          if (progress) {
+            if (progress.document_type) {
+              setDocumentType(progress.document_type);
+              sessionStorage.setItem('kyc_document_type', progress.document_type);
+            }
+            // Load saved files from database progress or sessionStorage
+            if (progress.front_document) {
+              setFrontPreview(progress.front_document);
+              sessionStorage.setItem('kyc_front_document', progress.front_document);
+              // Create a file object from base64 for the file state (optional, for UI consistency)
+              // Note: We store base64 in sessionStorage, file object is mainly for UI
+            } else {
+              const savedFront = sessionStorage.getItem('kyc_front_document');
+              if (savedFront) {
+                setFrontPreview(savedFront);
+              }
+            }
+            if (progress.back_document) {
+              setBackPreview(progress.back_document);
+              sessionStorage.setItem('kyc_back_document', progress.back_document);
+            } else {
+              const savedBack = sessionStorage.getItem('kyc_back_document');
+              if (savedBack) {
+                setBackPreview(savedBack);
+              }
+            }
+            // Mark files as uploaded if we have previews (for canContinue check)
+            // Create dummy file objects to satisfy the file state requirement
+            if (progress.front_document || sessionStorage.getItem('kyc_front_document')) {
+              const dummyFile = new File([''], 'saved-front.jpg', { type: 'image/jpeg' });
+              setFrontFile(dummyFile);
+            }
+            if (progress.back_document || sessionStorage.getItem('kyc_back_document')) {
+              const dummyFile = new File([''], 'saved-back.jpg', { type: 'image/jpeg' });
+              setBackFile(dummyFile);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading KYC progress:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadProgress();
+  }, [user]);
 
   const handleFileSelect = async (file: File, type: 'front' | 'back') => {
     if (file.size > 5 * 1024 * 1024) {
@@ -345,19 +581,66 @@ export const KYCDocumentUpload: React.FC<KYCProps> = ({ onNavigate }) => {
     e.preventDefault();
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!frontFile || !backFile) {
       setErrorMessage(dict.kyc.uploadBothSides || 'Please upload both front and back of your ID');
       setShowErrorModal(true);
       return;
     }
+    
     // Store document type
     sessionStorage.setItem('kyc_document_type', documentType);
+
+    // Save progress to database
+    try {
+      const token = localStorage.getItem('supabase.auth.token');
+      if (token) {
+        const frontBase64 = sessionStorage.getItem('kyc_front_document');
+        const backBase64 = sessionStorage.getItem('kyc_back_document');
+        
+        const saveResponse = await fetch('/api/kyc/save-progress', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            step: 'document-upload',
+            data: {
+              document_type: documentType,
+              front_document: frontBase64 || '',
+              back_document: backBase64 || ''
+            }
+          })
+        });
+        
+        if (saveResponse.ok) {
+          console.log('[KYC Document Upload] Progress saved successfully');
+        } else {
+          console.error('[KYC Document Upload] Failed to save progress:', saveResponse.status);
+        }
+      }
+    } catch (error) {
+      console.error('[KYC Document Upload] Error saving KYC progress:', error);
+      // Continue even if save fails
+    }
+
     // Navigate to next step (selfie verification - step 4)
     navigate('/kyc/selfie');
   };
 
   const canContinue = frontFile !== null && backFile !== null;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark py-20 px-4">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-gray-500 dark:text-gray-400">Loading your progress...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark py-20 px-4 relative overflow-hidden">
@@ -588,16 +871,68 @@ export const KYCDocumentUpload: React.FC<KYCProps> = ({ onNavigate }) => {
 export const KYCSelfie: React.FC<KYCProps> = ({ onNavigate }) => {
   const { dict } = useLanguage();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [selfieFile, setSelfieFile] = useState<File | null>(null);
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isCapturing, setIsCapturing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loading, setLoading] = React.useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load saved progress on mount
+  React.useEffect(() => {
+    const loadProgress = async () => {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('supabase.auth.token');
+        if (!token) {
+          setLoading(false);
+          return;
+        }
+
+        const response = await fetch('/api/kyc/progress', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const progress = data.data?.progress?.selfie;
+          if (progress?.selfie) {
+            // Load saved selfie from database progress or sessionStorage
+            setSelfiePreview(progress.selfie);
+            sessionStorage.setItem('kyc_selfie', progress.selfie);
+            // Create a dummy file object for state consistency
+            const dummyFile = new File([''], 'saved-selfie.jpg', { type: 'image/jpeg' });
+            setSelfieFile(dummyFile);
+          } else {
+            const savedSelfie = sessionStorage.getItem('kyc_selfie');
+            if (savedSelfie) {
+              setSelfiePreview(savedSelfie);
+              const dummyFile = new File([''], 'saved-selfie.jpg', { type: 'image/jpeg' });
+              setSelfieFile(dummyFile);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading KYC progress:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadProgress();
+  }, [user]);
 
   // Cleanup camera stream on unmount
   React.useEffect(() => {
@@ -607,6 +942,17 @@ export const KYCSelfie: React.FC<KYCProps> = ({ onNavigate }) => {
       }
     };
   }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-gray-500 dark:text-gray-400">Loading your progress...</p>
+        </div>
+      </div>
+    );
+  }
 
   const handleFileSelect = (file: File) => {
     if (file.size > 5 * 1024 * 1024) {
@@ -711,6 +1057,35 @@ export const KYCSelfie: React.FC<KYCProps> = ({ onNavigate }) => {
       setShowErrorModal(true);
       setIsSubmitting(false);
       return;
+    }
+
+    // Save progress before submitting
+    try {
+      const token = localStorage.getItem('supabase.auth.token');
+      if (token) {
+        const saveResponse = await fetch('/api/kyc/save-progress', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            step: 'selfie',
+            data: {
+              selfie: selfieBase64
+            }
+          })
+        });
+        
+        if (saveResponse.ok) {
+          console.log('[KYC Selfie] Progress saved successfully');
+        } else {
+          console.error('[KYC Selfie] Failed to save progress:', saveResponse.status);
+        }
+      }
+    } catch (error) {
+      console.error('[KYC Selfie] Error saving KYC progress:', error);
+      // Continue even if save fails
     }
 
     // Submit KYC data to backend

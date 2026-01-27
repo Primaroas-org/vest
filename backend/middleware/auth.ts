@@ -1,6 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabase } from '../config/supabase.js';
-import type { User } from '../types/index.js';
+import { db } from '../db/index.js';
+import { users } from '../db/schema.js';
+import { eq } from 'drizzle-orm';
+import type { User, KYCStatus } from '../types/index.js';
 
 // Extend Express Request to include user
 declare global {
@@ -21,9 +24,11 @@ export async function authenticate(
     next: NextFunction
 ): Promise<void> {
     try {
+        console.log('[Auth Middleware] Starting authentication');
         const authHeader = req.headers.authorization;
 
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            console.log('[Auth Middleware] Missing or invalid authorization header');
             res.status(401).json({
                 success: false,
                 error: 'Missing or invalid authorization header'
@@ -32,11 +37,13 @@ export async function authenticate(
         }
 
         const token = authHeader.substring(7);
+        console.log('[Auth Middleware] Token extracted, length:', token.length);
 
         // Verify token with Supabase
         const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(token);
 
         if (authError || !authUser) {
+            console.log('[Auth Middleware] Token verification failed:', authError?.message || 'No auth user');
             res.status(401).json({
                 success: false,
                 error: 'Invalid or expired token'
@@ -44,22 +51,34 @@ export async function authenticate(
             return;
         }
 
-        // Fetch full user data from database
-        const { data: user, error: userError } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', authUser.id)
-            .single();
+        console.log('[Auth Middleware] Token verified, user ID:', authUser.id);
 
-        if (userError || !user) {
+        // Fetch full user data from database using Drizzle
+        console.log('[Auth Middleware] Querying users table for ID:', authUser.id);
+        
+        const userResults = await db
+            .select()
+            .from(users)
+            .where(eq(users.id, authUser.id))
+            .limit(1);
+
+        console.log('[Auth Middleware] Query result - users found:', userResults?.length || 0);
+
+        if (!userResults || userResults.length === 0) {
+            console.log('[Auth Middleware] User not found in database');
             res.status(404).json({
                 success: false,
-                error: 'User not found'
+                error: 'User not found in database. Please contact support.'
             });
             return;
         }
 
-        if (!user.is_active) {
+        const dbUser = userResults[0];
+        console.log('[Auth Middleware] User found:', dbUser.email, 'ID:', dbUser.id);
+
+        console.log('[Auth Middleware] User found, calling next()');
+
+        if (!dbUser.isActive) {
             res.status(403).json({
                 success: false,
                 error: 'Account is inactive'
@@ -67,8 +86,26 @@ export async function authenticate(
             return;
         }
 
+        // Map Drizzle camelCase to snake_case for compatibility with existing types
+        const user: User = {
+            id: dbUser.id,
+            email: dbUser.email,
+            phone: dbUser.phone || undefined,
+            full_name: dbUser.fullName,
+            e_mongolia_id: dbUser.eMongoliaId || undefined,
+            kyc_status: dbUser.kycStatus as KYCStatus,
+            kyc_verified_at: dbUser.kycVerifiedAt || undefined,
+            kyc_data: dbUser.kycData as Record<string, any> || undefined,
+            wallet_balance: dbUser.walletBalance,
+            created_at: dbUser.createdAt,
+            updated_at: dbUser.updatedAt,
+            is_active: dbUser.isActive,
+            is_admin: dbUser.isAdmin,
+        };
+
         // Attach user to request
         req.user = user;
+        console.log('[Auth Middleware] User attached to request, proceeding to route handler');
         next();
     } catch (error) {
         console.error('Authentication error:', error);

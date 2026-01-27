@@ -1,4 +1,6 @@
-import { supabase } from '../config/supabase.js';
+import { db } from '../db/index.js';
+import { investments, properties } from '../db/schema.js';
+import { eq } from 'drizzle-orm';
 import { MNT } from '../utils/numeric.js';
 import type {
     PortfolioResponse,
@@ -15,32 +17,15 @@ export async function getPortfolio(req: any, res: any): Promise<void> {
     const user = req.user as User;
 
     try {
-        // Fetch all user investments with property details
-        const { data: investments, error: investmentsError } = await supabase
-            .from('investments')
-            .select(`
-                *,
-                property:properties (
-                    id,
-                    name,
-                    address,
-                    price_per_share,
-                    total_shares,
-                    expected_annual_yield
-                )
-            `)
-            .eq('user_id', user.id);
+        // Fetch all user investments with property details using Drizzle relations
+        const userInvestments = await db.query.investments.findMany({
+            where: eq(investments.userId, user.id),
+            with: {
+                property: true,
+            },
+        });
 
-        if (investmentsError) {
-            console.error('Portfolio fetch error:', investmentsError);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to fetch portfolio data'
-            } as ErrorResponse);
-            return;
-        }
-
-        if (!investments || investments.length === 0) {
+        if (!userInvestments || userInvestments.length === 0) {
             res.status(200).json({
                 success: true,
                 data: {
@@ -67,48 +52,48 @@ export async function getPortfolio(req: any, res: any): Promise<void> {
         let totalCurrentValue = '0.00';
         let totalDividendsReceived = '0.00';
 
-        const portfolioInvestments: PortfolioInvestment[] = investments.map((inv: any) => {
+        const portfolioInvestments: PortfolioInvestment[] = userInvestments.map((inv) => {
             const property = inv.property;
 
             // Current value = shares_owned * current_price_per_share
-            const currentValue = MNT.multiply(property.price_per_share, inv.shares_owned);
+            const currentValue = MNT.multiply(property.pricePerShare, inv.sharesOwned.toString());
 
             // Ownership percentage = (shares_owned / total_shares) * 100
             const ownershipPercentage = MNT.percentage(
-                inv.shares_owned.toString(),
-                property.total_shares.toString()
+                inv.sharesOwned.toString(),
+                property.totalShares.toString()
             );
 
             // Total return = current_value + dividends - invested
             const totalReturn = MNT.add(
-                MNT.subtract(currentValue, inv.total_invested),
-                inv.total_dividends_received
+                MNT.subtract(currentValue, inv.totalInvested),
+                inv.totalDividendsReceived
             );
 
             // Return percentage = (total_return / total_invested) * 100
-            const returnPercentage = MNT.percentage(totalReturn, inv.total_invested);
+            const returnPercentage = MNT.percentage(totalReturn, inv.totalInvested);
 
             // Accumulate totals
-            totalInvested = MNT.add(totalInvested, inv.total_invested);
+            totalInvested = MNT.add(totalInvested, inv.totalInvested);
             totalCurrentValue = MNT.add(totalCurrentValue, currentValue);
-            totalDividendsReceived = MNT.add(totalDividendsReceived, inv.total_dividends_received);
+            totalDividendsReceived = MNT.add(totalDividendsReceived, inv.totalDividendsReceived);
 
             return {
                 property_id: property.id,
                 property_name: property.name,
                 property_address: property.address,
-                shares_owned: inv.shares_owned,
-                total_shares: property.total_shares,
+                shares_owned: inv.sharesOwned,
+                total_shares: property.totalShares,
                 ownership_percentage: ownershipPercentage,
-                purchase_price_per_share: inv.purchase_price_per_share,
-                current_price_per_share: property.price_per_share,
-                total_invested: inv.total_invested,
+                purchase_price_per_share: inv.purchasePricePerShare,
+                current_price_per_share: property.pricePerShare,
+                total_invested: inv.totalInvested,
                 current_value: currentValue,
-                total_dividends_received: inv.total_dividends_received,
+                total_dividends_received: inv.totalDividendsReceived,
                 total_return: totalReturn,
                 total_return_percentage: returnPercentage,
-                expected_annual_yield: property.expected_annual_yield,
-                invested_at: inv.invested_at
+                expected_annual_yield: property.expectedAnnualYield || undefined,
+                invested_at: inv.investedAt
             };
         });
 

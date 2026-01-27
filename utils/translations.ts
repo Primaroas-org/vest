@@ -208,7 +208,13 @@ export const translations = {
       exploreProperties: "Хөрөнгүүдийг үзэх",
       goToDashboard: "Самбар руу орох",
       missingData: "KYC мэдээлэл дутуу байна. Дахин эхлүүлнэ үү.",
-      submitting: "Илгээж байна..."
+      submitting: "Илгээж байна...",
+      resumeVerification: "Баталгаажуулалтыг үргэлжлүүлэх",
+      resumeMessage: "Таны хадгалсан явц байна. Хагас дутуу байсан газартаа үргэлжлүүлнэ үү.",
+      continueVerification: "Баталгаажуулалтыг үргэлжлүүлэх",
+      startVerification: "Баталгаажуулалт эхлүүлэх",
+      secureAccount: "Бүртгэлээ аюулгүй болгоё",
+      verificationDescription: "Монгол Улсын санхүүгийн зохицуулалтын дагуу бид таны хувийн мэдээллийг баталгаажуулах шаардлагатай. Энэ нь ихэвчлэн 2 минутаас бага хугацаа шаарддаг."
     },
     dashboard: {
       privateWealth: "Хувийн баялаг",
@@ -492,7 +498,13 @@ export const translations = {
       exploreProperties: "Explore Properties",
       goToDashboard: "Go to Dashboard",
       missingData: "Missing KYC data. Please start over.",
-      submitting: "Submitting..."
+      submitting: "Submitting...",
+      resumeVerification: "Resume Verification",
+      resumeMessage: "You have saved progress. Continue from where you left off.",
+      continueVerification: "Continue Verification",
+      startVerification: "Start Verification",
+      secureAccount: "Let's secure your account.",
+      verificationDescription: "To comply with Mongolian financial regulations, we need to verify your identity. This usually takes less than 2 minutes."
     },
     dashboard: {
       privateWealth: "Private Wealth",
