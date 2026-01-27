@@ -11,6 +11,7 @@ import { PropertyDetails } from './components/PropertyDetails';
 import { HowItWorks, Resources, About, Contact, Privacy, Terms } from './components/Pages';
 import { Login, Signup, ForgotPassword, CheckEmail } from './components/AuthPages';
 import { KYCEntry, KYCRDNumber, KYCDocumentUpload, KYCSelfie, KYCComplete } from './components/KYC';
+import AdminPortal from './components/Admin/AdminPortal';
 import { Property, ViewState, PropertyStatus } from './types';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -446,6 +447,7 @@ const MainContent: React.FC = () => {
     const path = location.pathname;
     if (path === '/') return 'marketplace';
     if (path === '/dashboard') return 'dashboard';
+    if (path.startsWith('/admin')) return 'admin';
     if (path === '/login') return 'login';
     if (path === '/signup') return 'signup';
     if (path === '/forgot-password') return 'forgot-password';
@@ -464,7 +466,8 @@ const MainContent: React.FC = () => {
   const currentView = getCurrentView();
   const isAuxiliaryPage = ['how-it-works', 'resources', 'about', 'contact', 'privacy', 'terms', 'kyc', 'login', 'signup', 'forgot-password', 'check-email'].includes(currentView);
   const isDashboard = location.pathname.startsWith('/dashboard');
-  const shouldShowNavbar = !(user && isDashboard);
+  const isAdmin = location.pathname.startsWith('/admin');
+  const shouldShowNavbar = !(user && isDashboard) && !isAdmin;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -474,6 +477,7 @@ const MainContent: React.FC = () => {
         <Routes>
           <Route path="/" element={<Marketplace />} />
           <Route path="/dashboard/*" element={<Dashboard onNavigate={handleNavigate} />} />
+          <Route path="/admin/*" element={<AdminPortal />} />
           <Route path="/login" element={<Login onNavigate={handleNavigate} />} />
           <Route path="/signup" element={<Signup onNavigate={handleNavigate} />} />
           <Route path="/forgot-password" element={<ForgotPassword onNavigate={handleNavigate} />} />
@@ -491,10 +495,10 @@ const MainContent: React.FC = () => {
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
         </Routes>
-        {currentView !== 'property-details' && !isAuxiliaryPage && <StatsSection />}
+        {currentView !== 'property-details' && !isAuxiliaryPage && !isAdmin && <StatsSection />}
       </main>
 
-      {!isDashboard && <Footer onNavigate={handleNavigate} />}
+      {!isDashboard && !isAdmin && <Footer onNavigate={handleNavigate} />}
 
       {/* Dark Mode Toggle */}
       <button

@@ -273,7 +273,18 @@ export async function submitKYC(req: any, res: any): Promise<void> {
 
         // For development/testing: Auto-verify KYC if AUTO_VERIFY_KYC env var is set
         // In production, this should be 'pending' for manual review
-        const autoVerify = process.env.AUTO_VERIFY_KYC === 'true';
+        // Also auto-verify in development mode (NODE_ENV !== 'production')
+        const nodeEnv = process.env.NODE_ENV || 'development';
+        const autoVerifyEnv = process.env.AUTO_VERIFY_KYC;
+        const autoVerify = autoVerifyEnv === 'true' || 
+                          (nodeEnv !== 'production' && autoVerifyEnv !== 'false');
+        
+        console.log('[KYC Controller] Auto-verify check:', {
+            NODE_ENV: nodeEnv,
+            AUTO_VERIFY_KYC: autoVerifyEnv,
+            willAutoVerify: autoVerify
+        });
+        
         let finalStatus: 'pending' | 'verified' = 'pending';
         let verifiedAt: Date | undefined = undefined;
 
@@ -294,6 +305,8 @@ export async function submitKYC(req: any, res: any): Promise<void> {
                 .returning();
             
             console.log('[KYC Controller] KYC auto-verified:', verifiedUsers[0]?.kycStatus);
+        } else {
+            console.log('[KYC Controller] KYC will remain pending (auto-verify disabled)');
         }
 
         res.status(200).json({

@@ -139,6 +139,40 @@ app.get('/api/properties/:id', async (req: Request, res: Response) => {
     }
 });
 
+// Get single property details (admin - includes drafts)
+app.get('/api/admin/properties/:id', authenticate, requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { db } = await import('./db/index.js');
+        const { properties } = await import('./db/schema.js');
+        const { eq } = await import('drizzle-orm');
+
+        const data = await db
+            .select()
+            .from(properties)
+            .where(eq(properties.id, req.params.id))
+            .limit(1);
+
+        if (!data || data.length === 0) {
+            res.status(404).json({
+                success: false,
+                error: 'Property not found'
+            } as ErrorResponse);
+            return;
+        }
+
+        res.status(200).json({
+            success: true,
+            data: data[0]
+        });
+    } catch (error) {
+        console.error('Admin property fetch error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
 // =====================================================
 // AUTHENTICATED ROUTES (Require JWT)
 // =====================================================
@@ -692,6 +726,183 @@ app.post('/api/wallet/withdraw', authenticate, async (req: Request, res: Respons
 // ADMIN ROUTES (Require Admin Role)
 // =====================================================
 
+// Get admin dashboard statistics
+app.get('/api/admin/stats', authenticate, requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { db } = await import('./db/index.js');
+        const { users, properties, investments } = await import('./db/schema.js');
+        const { eq, sql } = await import('drizzle-orm');
+
+        // Get total assets value (sum of all property valuations)
+        const totalAssetsResult = await db.execute(sql`
+            SELECT COALESCE(SUM(total_valuation::numeric), 0)::text as total
+            FROM properties
+            WHERE status = 'active'
+        `);
+
+        // Get active investors count (users with verified KYC)
+        const activeInvestorsResult = await db.execute(sql`
+            SELECT COUNT(*)::int as count
+            FROM users
+            WHERE kyc_status = 'verified'
+        `);
+
+        // Get total capital raised (sum of all investments)
+        const totalCapitalResult = await db.execute(sql`
+            SELECT COALESCE(SUM(total_invested::numeric), 0)::text as total
+            FROM investments
+        `);
+
+        // Get average annual yield (average of all active properties)
+        const avgYieldResult = await db.execute(sql`
+            SELECT COALESCE(AVG(expected_annual_yield::numeric), 0)::numeric as avg
+            FROM properties
+            WHERE status = 'active' AND expected_annual_yield IS NOT NULL
+        `);
+
+        const totalAssets = (totalAssetsResult[0] as any)?.total || '0';
+        const activeInvestors = Number((activeInvestorsResult[0] as any)?.count || 0);
+        const totalCapital = (totalCapitalResult[0] as any)?.total || '0';
+        const avgYield = (avgYieldResult[0] as any)?.avg || 0;
+
+        res.status(200).json({
+            success: true,
+            data: {
+                totalAssetsValue: `₮${(parseFloat(String(totalAssets)) / 1000000000).toFixed(1)}B`,
+                activeInvestors: activeInvestors,
+                totalCapitalRaised: `₮${(parseFloat(String(totalCapital)) / 1000000).toFixed(0)}M`,
+                avgAnnualYield: `${parseFloat(String(avgYield)).toFixed(1)}%`
+            }
+        });
+    } catch (error) {
+        console.error('Admin stats error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// Get all investors (admin only)
+app.get('/api/admin/investors', authenticate, requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { db } = await import('./db/index.js');
+        const { users } = await import('./db/schema.js');
+        const { desc, sql } = await import('drizzle-orm');
+        const { page = 1, limit = 50 } = req.query;
+
+        const offset = (Number(page) - 1) * Number(limit);
+
+        // Get users with their total invested amount using raw SQL for aggregation
+        const investorsData = await db.execute(sql`
+            SELECT 
+                u.id,
+                u.email,
+                u.full_name,
+                u.kyc_status,
+                u.created_at,
+                COALESCE(SUM(i.total_invested::numeric), 0) as total_invested
+            FROM users u
+            LEFT JOIN investments i ON u.id = i.user_id
+            GROUP BY u.id, u.email, u.full_name, u.kyc_status, u.created_at
+            ORDER BY u.created_at DESC
+            LIMIT ${Number(limit)}
+            OFFSET ${offset}
+        `);
+
+        // Get total count
+        const countResult = await db.execute(sql`SELECT COUNT(*)::int as count FROM users`);
+        const total = Number((countResult[0] as any)?.count || 0);
+
+        res.status(200).json({
+            success: true,
+            data: investorsData.map((row: any) => ({
+                id: row.id,
+                email: row.email,
+                full_name: row.full_name,
+                kyc_status: row.kyc_status,
+                created_at: row.created_at,
+                total_invested: row.total_invested
+            })),
+            pagination: {
+                page: Number(page),
+                limit: Number(limit),
+                total: total
+            }
+        });
+    } catch (error) {
+        console.error('Admin investors error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// Get all transactions (admin only)
+app.get('/api/admin/transactions', authenticate, requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { db } = await import('./db/index.js');
+        const { transactions, properties, users } = await import('./db/schema.js');
+        const { desc } = await import('drizzle-orm');
+        const { limit = 100 } = req.query;
+
+        const data = await db.query.transactions.findMany({
+            with: {
+                property: {
+                    columns: {
+                        name: true,
+                    },
+                },
+                user: {
+                    columns: {
+                        fullName: true,
+                        email: true,
+                    },
+                },
+            },
+            orderBy: desc(transactions.createdAt),
+            limit: Number(limit),
+        });
+
+        res.status(200).json({
+            success: true,
+            data: data
+        });
+    } catch (error) {
+        console.error('Admin transactions error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// Get all properties (admin only - includes drafts)
+app.get('/api/admin/properties', authenticate, requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { db } = await import('./db/index.js');
+        const { properties } = await import('./db/schema.js');
+        const { desc } = await import('drizzle-orm');
+
+        const data = await db
+            .select()
+            .from(properties)
+            .orderBy(desc(properties.createdAt));
+
+        res.status(200).json({
+            success: true,
+            data: data
+        });
+    } catch (error) {
+        console.error('Admin properties error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
 // Distribute rental income
 app.post('/api/admin/distribute-rent', authenticate, requireAdmin, distributeRent);
 
@@ -738,6 +949,7 @@ app.post('/api/admin/properties', authenticate, requireAdmin, async (req: Reques
                 availableShares: total_shares,
                 expectedAnnualYield: expected_annual_yield || null,
                 monthlyRent: monthly_rent || '0.00',
+                images: req.body.images ? req.body.images : [],
                 status: 'draft'
             })
             .returning();
@@ -765,6 +977,93 @@ app.post('/api/admin/properties', authenticate, requireAdmin, async (req: Reques
     }
 });
 
+// Update property (admin only)
+app.patch('/api/admin/properties/:id', authenticate, requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const {
+            name,
+            description,
+            address,
+            property_type,
+            district,
+            total_valuation,
+            price_per_share,
+            total_shares,
+            expected_annual_yield,
+            monthly_rent,
+            status
+        } = req.body;
+
+        const { db } = await import('./db/index.js');
+        const { properties } = await import('./db/schema.js');
+        const { eq } = await import('drizzle-orm');
+
+        const updates: any = {};
+        if (name !== undefined) updates.name = name;
+        if (description !== undefined) updates.description = description;
+        if (address !== undefined) updates.address = address;
+        if (property_type !== undefined) updates.propertyType = property_type;
+        if (district !== undefined) updates.district = district;
+        if (total_valuation !== undefined) updates.totalValuation = total_valuation;
+        if (price_per_share !== undefined) updates.pricePerShare = price_per_share;
+        if (total_shares !== undefined) {
+            updates.totalShares = total_shares;
+            // If available_shares wasn't explicitly set, adjust it to maintain consistency
+            if (req.body.available_shares === undefined) {
+                const existing = await db.select().from(properties).where(eq(properties.id, req.params.id)).limit(1);
+                if (existing[0]) {
+                    const currentSold = existing[0].totalShares - existing[0].availableShares;
+                    updates.availableShares = Math.max(0, total_shares - currentSold);
+                }
+            }
+        }
+        if (req.body.available_shares !== undefined) updates.availableShares = req.body.available_shares;
+        if (expected_annual_yield !== undefined) updates.expectedAnnualYield = expected_annual_yield;
+        if (monthly_rent !== undefined) updates.monthlyRent = monthly_rent;
+        if (status !== undefined) {
+            if (!['draft', 'active', 'fully_funded', 'closed'].includes(status)) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Invalid status'
+                } as ErrorResponse);
+                return;
+            }
+            updates.status = status as any;
+        }
+        // Handle images array
+        if (req.body.images !== undefined) {
+            updates.images = req.body.images;
+        }
+        updates.updatedAt = new Date();
+        
+        const data = await db
+            .update(properties)
+            .set(updates)
+            .where(eq(properties.id, req.params.id))
+            .returning();
+
+        if (!data || data.length === 0) {
+            res.status(404).json({
+                success: false,
+                error: 'Property not found'
+            } as ErrorResponse);
+            return;
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Property updated',
+            data: data[0]
+        });
+    } catch (error) {
+        console.error('Property update error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
 // Update property status (admin only)
 app.patch('/api/admin/properties/:id/status', authenticate, requireAdmin, async (req: Request, res: Response) => {
     try {
@@ -784,7 +1083,7 @@ app.patch('/api/admin/properties/:id/status', authenticate, requireAdmin, async 
         
         const data = await db
             .update(properties)
-            .set({ status: status as any })
+            .set({ status: status as any, updatedAt: new Date() })
             .where(eq(properties.id, req.params.id))
             .returning();
 
@@ -799,10 +1098,129 @@ app.patch('/api/admin/properties/:id/status', authenticate, requireAdmin, async 
         res.status(200).json({
             success: true,
             message: 'Property status updated',
-            data: data
+            data: data[0]
         });
     } catch (error) {
         console.error('Property update error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// Get all KYC submissions (admin only)
+app.get('/api/admin/kyc', authenticate, requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { db } = await import('./db/index.js');
+        const { users } = await import('./db/schema.js');
+        const { desc, sql, isNotNull } = await import('drizzle-orm');
+
+        // Get all users with KYC data (those who have submitted KYC)
+        const kycData = await db.execute(sql`
+            SELECT 
+                u.id,
+                u.email,
+                u.full_name,
+                u.kyc_status,
+                u.kyc_data,
+                u.created_at,
+                u.kyc_verified_at,
+                u.e_mongolia_id as rd_number
+            FROM users u
+            WHERE u.kyc_data IS NOT NULL
+            ORDER BY u.created_at DESC
+        `);
+
+        const submissions = kycData.map((row: any) => {
+            const kycData = row.kyc_data || {};
+            return {
+                id: row.id,
+                user_id: row.id,
+                user_email: row.email,
+                user_name: row.full_name,
+                rd_number: row.rd_number || kycData.rd_number || 'N/A',
+                document_type: kycData.document_type || 'unknown',
+                kyc_status: row.kyc_status,
+                kyc_data: {
+                    rd_number: kycData.rd_number,
+                    document_type: kycData.document_type,
+                    front_document: kycData.front_document,
+                    back_document: kycData.back_document,
+                    selfie: kycData.selfie
+                },
+                created_at: row.created_at,
+                kyc_verified_at: row.kyc_verified_at
+            };
+        });
+
+        res.status(200).json({
+            success: true,
+            data: submissions
+        });
+    } catch (error) {
+        console.error('Admin KYC fetch error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred'
+        } as ErrorResponse);
+    }
+});
+
+// Verify user KYC (admin only)
+app.post('/api/admin/users/:userId/verify-kyc', authenticate, requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { userId } = req.params;
+        const { status } = req.body; // 'verified' or 'rejected'
+
+        if (!status || !['verified', 'rejected'].includes(status)) {
+            res.status(400).json({
+                success: false,
+                error: 'Status must be "verified" or "rejected"'
+            } as ErrorResponse);
+            return;
+        }
+
+        const { db } = await import('./db/index.js');
+        const { users } = await import('./db/schema.js');
+        const { eq } = await import('drizzle-orm');
+
+        const updateData: any = {
+            kycStatus: status as any,
+            updatedAt: new Date(),
+        };
+
+        if (status === 'verified') {
+            updateData.kycVerifiedAt = new Date();
+        } else if (status === 'rejected') {
+            updateData.kycVerifiedAt = null;
+        }
+
+        const data = await db
+            .update(users)
+            .set(updateData)
+            .where(eq(users.id, userId))
+            .returning();
+
+        if (!data || data.length === 0) {
+            res.status(404).json({
+                success: false,
+                error: 'User not found'
+            } as ErrorResponse);
+            return;
+        }
+
+        res.status(200).json({
+            success: true,
+            message: `KYC status updated to ${status}`,
+            data: {
+                user_id: userId,
+                kyc_status: data[0].kycStatus,
+                kyc_verified_at: data[0].kycVerifiedAt
+            }
+        });
+    } catch (error) {
+        console.error('KYC verification error:', error);
         res.status(500).json({
             success: false,
             error: 'An error occurred'

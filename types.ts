@@ -45,6 +45,7 @@ export interface StatItem {
 export type ViewState = 
   | 'marketplace' 
   | 'dashboard' 
+  | 'admin'
   | 'property-details' 
   | 'how-it-works' 
   | 'resources' 
