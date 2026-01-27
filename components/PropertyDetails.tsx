@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Property, ViewState } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -55,7 +56,8 @@ const openMap = (latitude: string | number | undefined, longitude: string | numb
 export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNavigate }) => {
   const { dict } = useLanguage();
   const { user, isAuthenticated, refreshUser } = useAuth();
-  
+  const navigate = useNavigate();
+
   // Extract numeric value from minInvest and format it (remove currency symbol, keep commas)
   const getInitialAmount = (): string => {
     if (property.minInvest) {
@@ -68,7 +70,7 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
     }
     return '';
   };
-  
+
   const [investmentAmount, setInvestmentAmount] = useState<string>(getInitialAmount());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -451,7 +453,34 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
                   </div>
                 ) : (
                   <button
-                    onClick={handleInvest}
+                    onClick={() => {
+                      if (!isAuthenticated) {
+                        setError('Please log in to invest');
+                        setTimeout(() => onNavigate('login'), 2000);
+                        return;
+                      }
+                      if (!user?.kycStatus || user.kycStatus === 'rejected') {
+                        setShowKYCModal(true);
+                        return;
+                      }
+                      if (user.kycStatus === 'pending') {
+                        setError('Your KYC verification is pending. Please wait up to 24 hours for review.');
+                        return;
+                      }
+                      // Navigate to checkout with calculated shares
+                      const numericValue = investmentAmount.replace(/[₮,\s]/g, '');
+                      const amount = parseFloat(numericValue) || 0;
+                      const pricePerShare = getPricePerShare();
+                      const calculatedShares = calculateShares(amount);
+                      if (calculatedShares > 0) {
+                        // Store checkout data in sessionStorage to pass to checkout
+                        sessionStorage.setItem('checkout_property', JSON.stringify(property));
+                        sessionStorage.setItem('checkout_shares', calculatedShares.toString());
+                        navigate(`/checkout/${property.id}`);
+                      } else {
+                        setError(`Minimum investment is ${pricePerShare.toLocaleString()} ₮`);
+                      }
+                    }}
                     disabled={loading || !isAuthenticated || (user && user.kycStatus === 'pending')}
                     className="w-full bg-primary hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/25 transition-all active:scale-95">
                     {loading 

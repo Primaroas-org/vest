@@ -8,6 +8,8 @@ import { StatsSection } from './components/StatsSection';
 import { Footer } from './components/Footer';
 import { Dashboard } from './components/Dashboard';
 import { PropertyDetails } from './components/PropertyDetails';
+import { Checkout } from './components/Checkout';
+import { InvestmentConfirmation } from './components/InvestmentConfirmation';
 import { HowItWorks, Resources, About, Contact, Privacy, Terms } from './components/Pages';
 import { Login, Signup, ForgotPassword, CheckEmail } from './components/AuthPages';
 import { KYCEntry, KYCRDNumber, KYCDocumentUpload, KYCSelfie, KYCComplete } from './components/KYC';
@@ -442,6 +444,268 @@ const MainContent: React.FC = () => {
     return <PropertyDetails property={property} onNavigate={handleNavigate} />;
   };
 
+  // Checkout Page component
+  const CheckoutPage: React.FC = () => {
+    const { id } = useParams<{ id: string }>();
+    const navigate = useNavigate();
+    const [property, setProperty] = useState<Property | null>(null);
+    const [loadingProperty, setLoadingProperty] = useState(true);
+    const [initialShares, setInitialShares] = useState<number>(0);
+    const [showConfirmationModal, setShowConfirmationModal] = useState(false);
+    const [investmentData, setInvestmentData] = useState<{
+      transaction_id?: string;
+      shares: number;
+      price_per_share: string;
+      total_cost: string;
+      new_balance: string;
+    } | null>(null);
+    const { refreshUser } = useAuth();
+
+    useEffect(() => {
+      // Get shares from sessionStorage if available
+      const storedShares = sessionStorage.getItem('checkout_shares');
+      if (storedShares) {
+        setInitialShares(parseInt(storedShares) || 0);
+      }
+
+      // Get property from sessionStorage or fetch from API
+      const storedProperty = sessionStorage.getItem('checkout_property');
+      if (storedProperty) {
+        try {
+          const parsed = JSON.parse(storedProperty);
+          setProperty(parsed);
+          setLoadingProperty(false);
+          return;
+        } catch (e) {
+          console.error('Error parsing stored property:', e);
+        }
+      }
+
+      // If not in sessionStorage, try to find in properties list or fetch from API
+      if (id) {
+        const foundProperty = properties.find(p => String(p.id) === String(id));
+        if (foundProperty) {
+          setProperty(foundProperty);
+          setLoadingProperty(false);
+          return;
+        }
+
+        // Fetch from API
+        const fetchProperty = async () => {
+          try {
+            setLoadingProperty(true);
+            const response = await fetch(`/api/properties/${id}`);
+            
+            if (!response.ok) {
+              setLoadingProperty(false);
+              return;
+            }
+
+            const data = await response.json();
+            if (data.success && data.data) {
+              const prop = data.data;
+              
+              const totalShares = prop.totalShares || prop.total_shares || 1;
+              const availableShares = prop.availableShares || prop.available_shares || 0;
+              const progress = totalShares > 0
+                ? Math.round(((totalShares - availableShares) / totalShares) * 100)
+                : 0;
+
+              let status: PropertyStatus = 'funding';
+              if (prop.status === 'fully_funded' || prop.status === 'closed') {
+                status = 'sold';
+              } else if (prop.status === 'active' && progress === 100) {
+                status = 'renting';
+              } else if (prop.status === 'active') {
+                status = 'funding';
+              }
+
+              const image = Array.isArray(prop.images) && prop.images.length > 0
+                ? prop.images[0]
+                : prop.image || '';
+
+              const propertyType = prop.propertyType || prop.property_type || 'residential';
+              let type: 'Residential' | 'Commercial' | 'Mixed Use' = 'Residential';
+              if (propertyType === 'commercial') {
+                type = 'Commercial';
+              } else if (propertyType === 'mixed') {
+                type = 'Mixed Use';
+              }
+
+              const pricePerShare = prop.pricePerShare || prop.price_per_share || '0';
+              const totalValuation = prop.totalValuation || prop.total_valuation || '0';
+              const expectedAnnualYield = prop.expectedAnnualYield || prop.expected_annual_yield || '0';
+
+              const mappedProperty: Property = {
+                id: prop.id,
+                title: prop.name || prop.title || 'Untitled Property',
+                location: prop.address || prop.location || 'Unknown Location',
+                type: type,
+                status: status,
+                image: image,
+                progress: progress,
+                targetReturn: parseFloat(String(expectedAnnualYield)) || 0,
+                minInvest: `₮ ${parseFloat(String(pricePerShare)).toLocaleString()}`,
+                isFavorite: false,
+                description: prop.description || '',
+                latitude: prop.latitude,
+                longitude: prop.longitude,
+                financials: {
+                  totalValue: `₮ ${parseFloat(String(totalValuation)).toLocaleString()}`,
+                  sharePrice: `₮ ${parseFloat(String(pricePerShare)).toLocaleString()}`,
+                  projectedYield: `${parseFloat(String(expectedAnnualYield)) || 0}%`,
+                  occupancyRate: prop.status === 'fully_funded' ? '100%' : 'Pre-lease'
+                }
+              };
+
+              setProperty(mappedProperty);
+            }
+          } catch (error) {
+            console.error('Error fetching property:', error);
+          } finally {
+            setLoadingProperty(false);
+          }
+        };
+
+        fetchProperty();
+      } else {
+        setLoadingProperty(false);
+      }
+    }, [id, properties]);
+
+    const handleComplete = async (shares: number) => {
+      if (!property) return;
+
+      try {
+        const token = localStorage.getItem('supabase.auth.token');
+        if (!token) {
+          throw new Error('Authentication required');
+        }
+
+        const response = await fetch('/api/invest', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            property_id: property.id,
+            shares: shares
+          })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Investment failed');
+        }
+
+        // Store investment data for confirmation modal
+        const pricePerShare = parseFloat(property.financials?.sharePrice?.replace(/[₮,\s]/g, '') || property.minInvest.replace(/[₮,\s]/g, '') || '0');
+        const transactionAmount = data.data?.transaction?.amount || (shares * pricePerShare).toString();
+        const investmentDataToStore = data.data ? {
+          transaction_id: data.data.transaction?.id || undefined,
+          shares: shares,
+          price_per_share: `₮ ${pricePerShare.toLocaleString()}`,
+          total_cost: `₮ ${parseFloat(transactionAmount).toLocaleString()}`,
+          new_balance: data.data.new_balance || '0.00'
+        } : {
+          shares: shares,
+          price_per_share: `₮ ${pricePerShare.toLocaleString()}`,
+          total_cost: `₮ ${(shares * pricePerShare).toLocaleString()}`,
+          new_balance: '0.00'
+        };
+
+        setInvestmentData(investmentDataToStore);
+        setShowConfirmationModal(true);
+
+        // Clear sessionStorage
+        sessionStorage.removeItem('checkout_property');
+        sessionStorage.removeItem('checkout_shares');
+
+        // Refresh user data
+        if (refreshUser) {
+          refreshUser().catch((err) => {
+            console.error('Error refreshing user:', err);
+          });
+        }
+      } catch (error) {
+        console.error('Investment error:', error);
+        alert(error instanceof Error ? error.message : 'Investment failed. Please try again.');
+      }
+    };
+
+    if (loadingProperty) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="animate-pulse text-gray-500">Loading checkout...</div>
+        </div>
+      );
+    }
+
+    if (!property) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-gray-600 dark:text-gray-400 text-lg">Property not found</p>
+            <button
+              onClick={() => navigate('/')}
+              className="mt-4 px-6 py-3 bg-primary text-white rounded-xl font-bold hover:bg-emerald-600 transition-all"
+            >
+              Back to Marketplace
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <Checkout
+          property={property}
+          initialShares={initialShares}
+          onNavigate={handleNavigate}
+          onComplete={handleComplete}
+        />
+        {investmentData && (
+          <InvestmentConfirmation
+            isOpen={showConfirmationModal}
+            onClose={() => {
+              setShowConfirmationModal(false);
+              setInvestmentData(null);
+              if (refreshUser) {
+                refreshUser().catch((err) => console.error('Error refreshing user:', err));
+              }
+            }}
+            onViewPortfolio={() => {
+              setShowConfirmationModal(false);
+              setInvestmentData(null);
+              if (refreshUser) {
+                refreshUser().catch((err) => console.error('Error refreshing user:', err));
+              }
+              navigate('/dashboard');
+            }}
+            onBrowseProperties={() => {
+              setShowConfirmationModal(false);
+              setInvestmentData(null);
+              if (refreshUser) {
+                refreshUser().catch((err) => console.error('Error refreshing user:', err));
+              }
+              navigate('/');
+            }}
+            onNavigate={(view) => {
+              if (view === 'dashboard') navigate('/dashboard');
+              else if (view === 'marketplace') navigate('/');
+              else handleNavigate(view);
+            }}
+            property={property}
+            investmentData={investmentData}
+          />
+        )}
+      </>
+    );
+  };
+
   // Helper function to determine current view for navbar
   const getCurrentView = (): ViewState => {
     const path = location.pathname;
@@ -488,6 +752,7 @@ const MainContent: React.FC = () => {
           <Route path="/kyc/selfie" element={<KYCSelfie onNavigate={handleNavigate} />} />
           <Route path="/kyc/complete" element={<KYCComplete onNavigate={handleNavigate} />} />
           <Route path="/property/:id" element={<PropertyDetailPage />} />
+          <Route path="/checkout/:id?" element={<CheckoutPage />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
           <Route path="/resources" element={<Resources />} />
           <Route path="/about" element={<About />} />
