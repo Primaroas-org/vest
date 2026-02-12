@@ -10,6 +10,7 @@ import { Dashboard } from './components/Dashboard';
 import { PropertyDetails } from './components/PropertyDetails';
 import { Checkout } from './components/Checkout';
 import { InvestmentConfirmation } from './components/InvestmentConfirmation';
+import { Modal } from './components/Modal';
 import { HowItWorks, Resources, About, Contact, Privacy, Terms } from './components/Pages';
 import { Login, Signup, ForgotPassword, CheckEmail } from './components/AuthPages';
 import { KYCEntry, KYCRDNumber, KYCDocumentUpload, KYCSelfie, KYCComplete } from './components/KYC';
@@ -25,7 +26,7 @@ const MainContent: React.FC = () => {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { dict } = useLanguage();
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading, showTimeoutWarning, resetSessionTimeout, sessionTimeout, logout } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   const [propertiesLoading, setPropertiesLoading] = useState(true);
 
@@ -324,7 +325,7 @@ const MainContent: React.FC = () => {
         try {
           setLoadingProperty(true);
           const response = await fetch(`/api/properties/${id}`);
-          
+
           if (!response.ok) {
             setLoadingProperty(false);
             return;
@@ -333,7 +334,7 @@ const MainContent: React.FC = () => {
           const data = await response.json();
           if (data.success && data.data) {
             const prop = data.data;
-            
+
             // Calculate progress percentage
             const totalShares = prop.totalShares || prop.total_shares || 1;
             const availableShares = prop.availableShares || prop.available_shares || 0;
@@ -495,7 +496,7 @@ const MainContent: React.FC = () => {
           try {
             setLoadingProperty(true);
             const response = await fetch(`/api/properties/${id}`);
-            
+
             if (!response.ok) {
               setLoadingProperty(false);
               return;
@@ -504,7 +505,7 @@ const MainContent: React.FC = () => {
             const data = await response.json();
             if (data.success && data.data) {
               const prop = data.data;
-              
+
               const totalShares = prop.totalShares || prop.total_shares || 1;
               const availableShares = prop.availableShares || prop.available_shares || 0;
               const progress = totalShares > 0
@@ -573,13 +574,20 @@ const MainContent: React.FC = () => {
       }
     }, [id, properties]);
 
-    const handleComplete = async (shares: number) => {
+    const handleComplete = async (shares: number, paymentMethod?: string) => {
       if (!property) return;
 
       try {
         const token = localStorage.getItem('supabase.auth.token');
         if (!token) {
           throw new Error('Authentication required');
+        }
+
+        // Validate payment method
+        if (paymentMethod === 'bank') {
+          // For now, bank transfer will use wallet balance
+          // In the future, this should integrate with a payment gateway
+          console.log('Bank transfer selected - using wallet balance for now');
         }
 
         const response = await fetch('/api/invest', {
@@ -590,7 +598,8 @@ const MainContent: React.FC = () => {
           },
           body: JSON.stringify({
             property_id: property.id,
-            shares: shares
+            shares: shares,
+            payment_method: paymentMethod || 'wallet'
           })
         });
 
@@ -623,12 +632,8 @@ const MainContent: React.FC = () => {
         sessionStorage.removeItem('checkout_property');
         sessionStorage.removeItem('checkout_shares');
 
-        // Refresh user data
-        if (refreshUser) {
-          refreshUser().catch((err) => {
-            console.error('Error refreshing user:', err);
-          });
-        }
+        // Don't refresh user data immediately - it causes re-renders that can close the modal
+        // We'll refresh it when the modal closes instead
       } catch (error) {
         console.error('Investment error:', error);
         alert(error instanceof Error ? error.message : 'Investment failed. Please try again.');
@@ -764,6 +769,27 @@ const MainContent: React.FC = () => {
       </main>
 
       {!isDashboard && !isAdmin && <Footer onNavigate={handleNavigate} />}
+
+      {/* Session Timeout Warning Modal */}
+      <Modal
+        isOpen={showTimeoutWarning}
+        onClose={async () => {
+          // Logout when user clicks "Logout Now"
+          await logout();
+        }}
+        onConfirm={() => {
+          // Extend session when user clicks "Stay Logged In"
+          resetSessionTimeout();
+        }}
+        title={dict.nav?.timeoutWarning?.title || 'Session Timeout Warning'}
+        message={
+          dict.nav?.timeoutWarning?.message || 
+          `Your session will expire in ${sessionTimeout ? Math.ceil(sessionTimeout / 60) : 1} minute(s) due to inactivity. Would you like to stay logged in?`
+        }
+        confirmText={dict.nav?.timeoutWarning?.stayLoggedIn || 'Stay Logged In'}
+        cancelText={dict.nav?.timeoutWarning?.logout || 'Logout Now'}
+        type="confirm"
+      />
 
       {/* Dark Mode Toggle */}
       <button

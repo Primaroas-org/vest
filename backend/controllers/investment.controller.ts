@@ -18,8 +18,19 @@ import type {
  * Allows a user to invest in a property by purchasing shares
  */
 export async function invest(req: any, res: any): Promise<void> {
-    const { property_id, shares }: InvestRequest = req.body;
+    const { property_id, shares, payment_method }: InvestRequest & { payment_method?: string } = req.body;
     const user = req.user as User;
+    
+    // Note: Currently, all investments use wallet balance regardless of payment_method
+    // In the future, payment_method === 'bank' should integrate with payment gateway
+    // For now, we validate the payment method but always use wallet
+    if (payment_method && payment_method !== 'wallet' && payment_method !== 'bank') {
+        res.status(400).json({
+            success: false,
+            error: 'Invalid payment method'
+        } as ErrorResponse);
+        return;
+    }
 
     try {
         // Validation

@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { Property, ViewState } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
+import { Modal } from './Modal';
 
 interface CheckoutProps {
   property: Property;
   initialShares?: number;
   onNavigate: (view: ViewState) => void;
-  onComplete: (shares: number) => void;
+  onComplete: (shares: number, paymentMethod?: string) => void;
 }
 
 export const Checkout: React.FC<CheckoutProps> = ({ 
@@ -18,12 +19,15 @@ export const Checkout: React.FC<CheckoutProps> = ({
   onComplete 
 }) => {
   const { dict } = useLanguage();
-  const { user } = useAuth();
+  const { user, resetSessionTimeout } = useAuth();
   const navigate = useNavigate();
   const [shares, setShares] = useState<number>(initialShares || 10);
   const [paymentMethod, setPaymentMethod] = useState<string>('wallet');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cards, setCards] = useState<any[]>([]);
+  const [cardsLoading, setCardsLoading] = useState(true);
+  const [showNoCardModal, setShowNoCardModal] = useState(false);
 
   // Extract price per share
   const getPricePerShare = (): number => {
@@ -45,6 +49,37 @@ export const Checkout: React.FC<CheckoutProps> = ({
   const platformFee = 0; // Platform fee is waived
   const total = subtotal + platformFee;
   const minShares = 1;
+
+  // Fetch user's saved cards
+  useEffect(() => {
+    const fetchCards = async () => {
+      if (!user) {
+        setCardsLoading(false);
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('supabase.auth.token');
+        const response = await fetch('/api/cards', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setCards(data.data || []);
+        }
+      } catch (error) {
+        console.error('Error fetching cards:', error);
+      } finally {
+        setCardsLoading(false);
+      }
+    };
+
+    fetchCards();
+  }, [user]);
 
   const handleSharesChange = (delta: number) => {
     const newShares = Math.max(minShares, shares + delta);
@@ -76,12 +111,36 @@ export const Checkout: React.FC<CheckoutProps> = ({
       return;
     }
 
+    // Check if bank transfer is selected but user has no cards
+    if (paymentMethod === 'bank') {
+      if (cardsLoading) {
+        setError('Loading payment methods...');
+        setLoading(false);
+        return;
+      }
+      
+      if (cards.length === 0) {
+        setShowNoCardModal(true);
+        setLoading(false);
+        return;
+      }
+    }
+
+    // Check wallet balance if wallet payment is selected
+    if (paymentMethod === 'wallet') {
+      if (!user.balance || user.balance < total) {
+        setError('Insufficient wallet balance. Please add funds or choose bank transfer.');
+        setLoading(false);
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      // Call the onComplete callback with the shares
-      await onComplete(shares);
+      // Call the onComplete callback with the shares and payment method
+      await onComplete(shares, paymentMethod);
     } catch (err) {
       console.error('Checkout error:', err);
       setError('An error occurred. Please try again.');
@@ -419,7 +478,7 @@ export const Checkout: React.FC<CheckoutProps> = ({
                 <div className="p-6 pt-0">
                   <button
                     onClick={handleConfirm}
-                    disabled={loading || !user || shares < minShares || (paymentMethod === 'wallet' && user && user.balance < total)}
+                    disabled={loading || !user || shares < minShares || (paymentMethod === 'wallet' && user && user.balance < total) || (paymentMethod === 'bank' && cardsLoading)}
                     className="w-full group bg-gradient-to-r from-primary to-emerald-600 hover:to-emerald-700 text-white font-bold py-4 px-6 rounded-xl shadow-lg shadow-emerald-500/20 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {loading ? (
@@ -437,6 +496,14 @@ export const Checkout: React.FC<CheckoutProps> = ({
                   {paymentMethod === 'wallet' && user && user.balance < total && (
                     <p className="text-center text-xs text-red-500 dark:text-red-400 mt-2">
                       {dict.dashboard?.wallet?.balance || 'Insufficient'} {dict.dashboard?.wallet?.balance || 'balance'}
+                    </p>
+                  )}
+                  {paymentMethod === 'bank' && cards.length > 0 && (
+                    <p className="text-center text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      {cards.find((c: any) => c.isDefault) 
+                        ? `Using card: ${cards.find((c: any) => c.isDefault)?.bankName} ****${cards.find((c: any) => c.isDefault)?.lastFourDigits}`
+                        : `Using card: ${cards[0]?.bankName} ****${cards[0]?.lastFourDigits}`
+                      }
                     </p>
                   )}
                   <p className="text-center text-xs text-gray-500 dark:text-gray-500 mt-4 leading-relaxed px-4">
@@ -460,6 +527,49 @@ export const Checkout: React.FC<CheckoutProps> = ({
           </div>
         </div>
       </main>
+
+      {/* No Card Modal */}
+      <Modal
+        isOpen={showNoCardModal}
+        onClose={() => setShowNoCardModal(false)}
+        onCancel={() => {
+          // Reset session timeout to prevent premature logout during navigation
+          if (resetSessionTimeout) {
+            resetSessionTimeout();
+          }
+          // Navigate to dashboard wallet tab using React Router (no page reload)
+          navigate('/dashboard/wallet');
+          setShowNoCardModal(false);
+        }}
+        onConfirm={async () => {
+          setShowNoCardModal(false);
+          setPaymentMethod('wallet');
+          // Check wallet balance before proceeding
+          if (!user?.balance || user.balance < total) {
+            setError('Insufficient wallet balance. Please add funds to your wallet.');
+            return;
+          }
+          // Proceed with wallet payment
+          setLoading(true);
+          setError(null);
+          try {
+            await onComplete(shares, 'wallet');
+          } catch (err) {
+            console.error('Checkout error:', err);
+            setError('An error occurred. Please try again.');
+            setLoading(false);
+          }
+        }}
+        title={dict.dashboard?.wallet?.cards ? 'No Payment Cards' : 'No Payment Cards'}
+        message={
+          dict.dashboard?.wallet?.cards
+            ? 'You don\'t have any saved payment cards. Would you like to use your wallet balance instead, or add a card in your dashboard?'
+            : 'You don\'t have any saved payment cards. Would you like to use your wallet balance instead, or add a card in your dashboard?'
+        }
+        confirmText={dict.dashboard?.wallet?.balance ? 'Use Wallet' : 'Use Wallet'}
+        cancelText={dict.dashboard?.wallet?.cards ? 'Add Card' : 'Add Card'}
+        type="confirm"
+      />
     </div>
   );
 };

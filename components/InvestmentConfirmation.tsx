@@ -134,8 +134,8 @@ export const InvestmentConfirmation: React.FC<InvestmentConfirmationProps> = ({
               {dict.investmentConfirmation?.title || 'Investment Confirmed'}
             </h1>
             <p className="text-gray-600 dark:text-gray-400 text-sm max-w-sm mx-auto">
-              {dict.investmentConfirmation?.subtitle?.replace('{property}', property.title) || 
-               `You are now a shareholder in ${property.title}. Your transaction has been processed successfully.`}
+              {dict.investmentConfirmation?.subtitle?.replace('{property}', property.title) ||
+                `You are now a shareholder in ${property.title}. Your transaction has been processed successfully.`}
             </p>
           </div>
 

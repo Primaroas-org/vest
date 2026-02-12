@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { supabase } from '../utils/supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 
@@ -21,6 +21,9 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<{ error?: string }>;
   refreshUser: () => Promise<void>;
   loading: boolean;
+  sessionTimeout: number | null; // Time remaining in seconds, null if not authenticated
+  showTimeoutWarning: boolean; // Whether to show the warning modal
+  resetSessionTimeout: () => void; // Reset the timeout on user activity
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -31,6 +34,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const sessionHandledRef = useRef(false);
   const fetchingProfileRef = useRef<Promise<void> | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
+  
+  // Session timeout state
+  const [sessionTimeout, setSessionTimeout] = useState<number | null>(null);
+  const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const warningTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastActivityRef = useRef<number>(Date.now());
+  
+  // Session timeout constants (5 minutes total, warn at 4 minutes)
+  const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+  const WARNING_TIME_MS = 4 * 60 * 1000; // 4 minutes (warn 1 minute before)
 
   useEffect(() => {
     // Handle email confirmation callback
@@ -38,7 +52,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const hashParams = new URLSearchParams(window.location.hash.substring(1));
       const accessToken = hashParams.get('access_token');
       const refreshToken = hashParams.get('refresh_token');
-      
+
       if (accessToken && refreshToken) {
         // Set the session with the tokens from the email confirmation
         const { data, error } = await supabase.auth.setSession({
@@ -68,10 +82,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         // Check localStorage first for cached token
         const cachedToken = localStorage.getItem('supabase.auth.token');
-        
+
         // Get session from Supabase (this is fast if session exists)
         const { data: { session }, error } = await supabase.auth.getSession();
-        
+
         if (error) {
           console.error('Error getting session:', error);
           localStorage.removeItem('supabase.auth.token');
@@ -177,84 +191,48 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       currentUserIdRef.current = supabaseUser.id;
 
       try {
-      console.log('Fetching user profile for ID:', supabaseUser.id);
+        console.log('Fetching user profile for ID:', supabaseUser.id);
 
-      // Create a timeout that actually rejects after 10 seconds (increased from 3)
-      // This gives more time for the database query to complete
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => {
-          reject(new Error('TIMEOUT'));
-        }, 10000)
-      );
+        // Create a timeout that actually rejects after 10 seconds (increased from 3)
+        // This gives more time for the database query to complete
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => {
+            reject(new Error('TIMEOUT'));
+          }, 10000)
+        );
 
-      const queryPromise = supabase
-        .from('users')
-        .select('*')
-        .eq('id', supabaseUser.id)
-        .single();
+        const queryPromise = supabase
+          .from('users')
+          .select('*')
+          .eq('id', supabaseUser.id)
+          .single();
 
-      // Race between query and timeout - if timeout wins, we'll catch and use fallback
-      let profile, error;
-      try {
-        const result = await Promise.race([queryPromise, timeoutPromise]);
-        // If we got here, query completed (timeout didn't win)
-        profile = result.data;
-        error = result.error;
-      } catch (timeoutError: any) {
-        if (timeoutError?.message === 'TIMEOUT' || timeoutError?.message?.includes('timeout')) {
-          console.error('Profile query timed out after 10 seconds - using fallback user');
-          error = { code: 'TIMEOUT', message: 'Query timeout' };
-          profile = null;
-        } else {
-          // Some other error occurred
-          throw timeoutError;
+        // Race between query and timeout - if timeout wins, we'll catch and use fallback
+        let profile, error;
+        try {
+          const result = await Promise.race([queryPromise, timeoutPromise]);
+          // If we got here, query completed (timeout didn't win)
+          profile = result.data;
+          error = result.error;
+        } catch (timeoutError: any) {
+          if (timeoutError?.message === 'TIMEOUT' || timeoutError?.message?.includes('timeout')) {
+            console.error('Profile query timed out after 10 seconds - using fallback user');
+            error = { code: 'TIMEOUT', message: 'Query timeout' };
+            profile = null;
+          } else {
+            // Some other error occurred
+            throw timeoutError;
+          }
         }
-      }
 
-      console.log('Profile fetch result:', { profile, error, errorCode: error?.code });
+        console.log('Profile fetch result:', { profile, error, errorCode: error?.code });
 
-      if (error) {
-        console.error('Error fetching profile:', error);
-        
-        // Handle timeout - preserve existing user balance if available
-        if (error.code === 'TIMEOUT') {
-          console.log('Query timed out, setting fallback user');
-          // Preserve existing balance if user was already loaded
-          const existingBalance = user?.balance || 0;
-          const fallbackUser: User = {
-            id: supabaseUser.id,
-            name: supabaseUser.user_metadata?.full_name || supabaseUser.email?.split('@')[0] || 'User',
-            email: supabaseUser.email || '',
-            avatar: supabaseUser.user_metadata?.avatar_url,
-            isVerified: false,
-            balance: existingBalance
-          };
-          console.log('Setting fallback user due to timeout (preserving balance):', fallbackUser);
-          setUser(fallbackUser);
-          return;
-        }
-        
-        // If user doesn't exist in users table (PGRST116 = no rows returned), create it
-        if (error.code === 'PGRST116') {
-          console.log('User not found in database, creating user record...');
-          await createUserFromAuth(supabaseUser);
+        if (error) {
+          console.error('Error fetching profile:', error);
 
-          // Wait a moment for the database to process
-          await new Promise(resolve => setTimeout(resolve, 500));
-
-          // Retry fetching after creating
-          console.log('Retrying profile fetch after creation...');
-          const { data: newProfile, error: retryError } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', supabaseUser.id)
-            .single();
-
-          console.log('Retry result:', { newProfile, retryError });
-
-          if (retryError) {
-            console.error('Error fetching profile after creation:', retryError);
-            // Even if retry fails, set a basic user object so login can proceed
+          // Handle timeout - preserve existing user balance if available
+          if (error.code === 'TIMEOUT') {
+            console.log('Query timed out, setting fallback user');
             // Preserve existing balance if user was already loaded
             const existingBalance = user?.balance || 0;
             const fallbackUser: User = {
@@ -265,50 +243,86 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               isVerified: false,
               balance: existingBalance
             };
-            console.log('Setting fallback user due to retry error (preserving balance):', fallbackUser);
+            console.log('Setting fallback user due to timeout (preserving balance):', fallbackUser);
             setUser(fallbackUser);
             return;
           }
 
-          const userData: User = {
+          // If user doesn't exist in users table (PGRST116 = no rows returned), create it
+          if (error.code === 'PGRST116') {
+            console.log('User not found in database, creating user record...');
+            await createUserFromAuth(supabaseUser);
+
+            // Wait a moment for the database to process
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Retry fetching after creating
+            console.log('Retrying profile fetch after creation...');
+            const { data: newProfile, error: retryError } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', supabaseUser.id)
+              .single();
+
+            console.log('Retry result:', { newProfile, retryError });
+
+            if (retryError) {
+              console.error('Error fetching profile after creation:', retryError);
+              // Even if retry fails, set a basic user object so login can proceed
+              // Preserve existing balance if user was already loaded
+              const existingBalance = user?.balance || 0;
+              const fallbackUser: User = {
+                id: supabaseUser.id,
+                name: supabaseUser.user_metadata?.full_name || supabaseUser.email?.split('@')[0] || 'User',
+                email: supabaseUser.email || '',
+                avatar: supabaseUser.user_metadata?.avatar_url,
+                isVerified: false,
+                balance: existingBalance
+              };
+              console.log('Setting fallback user due to retry error (preserving balance):', fallbackUser);
+              setUser(fallbackUser);
+              return;
+            }
+
+            const userData: User = {
+              id: supabaseUser.id,
+              name: newProfile?.full_name || supabaseUser.user_metadata?.full_name || 'User',
+              email: supabaseUser.email || '',
+              avatar: supabaseUser.user_metadata?.avatar_url,
+              isVerified: newProfile?.kyc_status === 'verified' || false,
+              kycStatus: (newProfile?.kyc_status as 'pending' | 'verified' | 'rejected') || undefined,
+              balance: parseFloat(newProfile?.wallet_balance || '0')
+            };
+            console.log('User profile loaded after creation:', userData);
+            setUser(userData);
+            return;
+          }
+          console.error('Non-recoverable error fetching profile, code:', error.code);
+          // Even on error, set a basic user object so login can proceed
+          // Preserve existing balance if user was already loaded
+          const existingBalance = user?.balance || 0;
+          const fallbackUser: User = {
             id: supabaseUser.id,
-            name: newProfile?.full_name || supabaseUser.user_metadata?.full_name || 'User',
+            name: supabaseUser.user_metadata?.full_name || supabaseUser.email?.split('@')[0] || 'User',
             email: supabaseUser.email || '',
             avatar: supabaseUser.user_metadata?.avatar_url,
-            isVerified: newProfile?.kyc_status === 'verified' || false,
-            kycStatus: (newProfile?.kyc_status as 'pending' | 'verified' | 'rejected') || undefined,
-            balance: parseFloat(newProfile?.wallet_balance || '0')
+            isVerified: false,
+            balance: existingBalance
           };
-          console.log('User profile loaded after creation:', userData);
-          setUser(userData);
+          console.log('Setting fallback user due to non-recoverable error (preserving balance):', fallbackUser);
+          setUser(fallbackUser);
           return;
         }
-        console.error('Non-recoverable error fetching profile, code:', error.code);
-        // Even on error, set a basic user object so login can proceed
-        // Preserve existing balance if user was already loaded
-        const existingBalance = user?.balance || 0;
-        const fallbackUser: User = {
+
+        const userData: User = {
           id: supabaseUser.id,
-          name: supabaseUser.user_metadata?.full_name || supabaseUser.email?.split('@')[0] || 'User',
+          name: profile?.full_name || supabaseUser.user_metadata?.full_name || 'User',
           email: supabaseUser.email || '',
           avatar: supabaseUser.user_metadata?.avatar_url,
-          isVerified: false,
-          balance: existingBalance
+          isVerified: profile?.kyc_status === 'verified' || false,
+          kycStatus: (profile?.kyc_status as 'pending' | 'verified' | 'rejected') || undefined,
+          balance: parseFloat(profile?.wallet_balance || '0')
         };
-        console.log('Setting fallback user due to non-recoverable error (preserving balance):', fallbackUser);
-        setUser(fallbackUser);
-        return;
-      }
-
-      const userData: User = {
-        id: supabaseUser.id,
-        name: profile?.full_name || supabaseUser.user_metadata?.full_name || 'User',
-        email: supabaseUser.email || '',
-        avatar: supabaseUser.user_metadata?.avatar_url,
-        isVerified: profile?.kyc_status === 'verified' || false,
-        kycStatus: (profile?.kyc_status as 'pending' | 'verified' | 'rejected') || undefined,
-        balance: parseFloat(profile?.wallet_balance || '0')
-      };
 
         console.log('User profile loaded:', userData);
         setUser(userData);
@@ -431,7 +445,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // If email confirmation is required, inform the user
       if (data.user && !data.session) {
         setLoading(false);
-        return { 
+        return {
           error: null,
           message: 'Please check your email and click the confirmation link to complete your registration.'
         };
@@ -483,7 +497,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user && session?.access_token) {
         console.log('[AuthContext] Refreshing user profile via API...');
-        
+
         // Use the API endpoint to get the latest user data from backend
         const token = session.access_token;
         const response = await fetch('/api/user/me', {
@@ -520,7 +534,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const errorText = await response.text();
           console.error('[AuthContext] API error response:', errorText);
         }
-        
+
         // Fallback to Supabase query if API fails
         console.log('[AuthContext] API refresh failed, falling back to Supabase query...');
         await fetchUserProfile(session.user);
@@ -539,6 +553,97 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  // Reset session timeout on user activity
+  const resetSessionTimeout = useCallback(() => {
+    if (!user) return;
+    
+    lastActivityRef.current = Date.now();
+    setShowTimeoutWarning(false);
+    
+    // Clear existing timeouts
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    if (warningTimeoutRef.current) {
+      clearTimeout(warningTimeoutRef.current);
+    }
+    
+    // Set warning timeout (4 minutes)
+    warningTimeoutRef.current = setTimeout(() => {
+      setShowTimeoutWarning(true);
+    }, WARNING_TIME_MS);
+    
+    // Set logout timeout (5 minutes)
+    timeoutRef.current = setTimeout(async () => {
+      console.log('[AuthContext] Session timeout - logging out');
+      setShowTimeoutWarning(false);
+      await logout();
+    }, SESSION_TIMEOUT_MS);
+  }, [user, logout]);
+
+  // Update timeout countdown display
+  useEffect(() => {
+    if (!user) {
+      setSessionTimeout(null);
+      setShowTimeoutWarning(false);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      if (warningTimeoutRef.current) {
+        clearTimeout(warningTimeoutRef.current);
+        warningTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    const updateCountdown = () => {
+      const elapsed = Date.now() - lastActivityRef.current;
+      const remaining = Math.max(0, SESSION_TIMEOUT_MS - elapsed);
+      const secondsRemaining = Math.ceil(remaining / 1000);
+      setSessionTimeout(secondsRemaining);
+    };
+
+    // Update immediately
+    updateCountdown();
+
+    // Update every second
+    const interval = setInterval(updateCountdown, 1000);
+
+    return () => clearInterval(interval);
+  }, [user]);
+
+  // Set up activity listeners
+  useEffect(() => {
+    if (!user) return;
+
+    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    
+    const handleActivity = () => {
+      resetSessionTimeout();
+    };
+
+    // Add event listeners
+    activityEvents.forEach(event => {
+      document.addEventListener(event, handleActivity, true);
+    });
+
+    // Initialize timeout
+    resetSessionTimeout();
+
+    return () => {
+      activityEvents.forEach(event => {
+        document.removeEventListener(event, handleActivity, true);
+      });
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      if (warningTimeoutRef.current) {
+        clearTimeout(warningTimeoutRef.current);
+      }
+    };
+  }, [user, resetSessionTimeout]);
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -548,7 +653,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       register,
       resetPassword,
       refreshUser,
-      loading
+      loading,
+      sessionTimeout,
+      showTimeoutWarning,
+      resetSessionTimeout
     }}>
       {children}
     </AuthContext.Provider>
