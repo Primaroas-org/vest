@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Search, CheckCircle, XCircle, Eye, Filter, X } from 'lucide-react';
+import { cachedFetch, getCached, invalidateCache } from '../../utils/apiCache';
 
 interface KYCSubmission {
   id: string;
@@ -15,8 +16,8 @@ interface KYCSubmission {
 }
 
 const AdminKYC: React.FC = () => {
-  const [submissions, setSubmissions] = useState<KYCSubmission[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [submissions, setSubmissions] = useState<KYCSubmission[]>(() => getCached('admin:kyc') || []);
+  const [loading, setLoading] = useState(!getCached('admin:kyc'));
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [viewingSubmission, setViewingSubmission] = useState<KYCSubmission | null>(null);
@@ -24,24 +25,19 @@ const AdminKYC: React.FC = () => {
   useEffect(() => {
     const fetchKYCs = async () => {
       try {
-        setLoading(true);
+        if (!getCached('admin:kyc')) setLoading(true);
         const token = localStorage.getItem('access_token') || localStorage.getItem('supabase.auth.token');
-        const response = await fetch('/api/admin/kyc', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.data) {
-            console.log('KYC submissions data:', data.data);
-            // Log first submission's kyc_data structure for debugging
-            if (data.data.length > 0) {
-              console.log('First submission kyc_data:', JSON.stringify(data.data[0].kyc_data, null, 2));
+        const data = await cachedFetch('admin:kyc', async () => {
+          const response = await fetch('/api/admin/kyc', {
+            headers: {
+              'Authorization': `Bearer ${token}`
             }
-            setSubmissions(data.data);
-          }
+          });
+          if (!response.ok) throw new Error('Failed to fetch KYC');
+          return response.json();
+        });
+        if (data.success && data.data) {
+          setSubmissions(data.data);
         }
       } catch (error) {
         console.error('Error fetching KYC submissions:', error);

@@ -16,6 +16,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({ onFilterChange, filters })
   const { dict } = useLanguage();
   const [localSearch, setLocalSearch] = useState(filters.searchQuery);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  // Use refs to avoid stale closure in debounce
+  const filtersRef = useRef(filters);
+  const onFilterChangeRef = useRef(onFilterChange);
+  filtersRef.current = filters;
+  onFilterChangeRef.current = onFilterChange;
 
   // Debounce search input to avoid filtering on every keystroke
   useEffect(() => {
@@ -23,8 +28,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({ onFilterChange, filters })
       clearTimeout(debounceRef.current);
     }
     debounceRef.current = setTimeout(() => {
-      if (localSearch !== filters.searchQuery) {
-        onFilterChange({ ...filters, searchQuery: localSearch });
+      if (localSearch !== filtersRef.current.searchQuery) {
+        onFilterChangeRef.current({ ...filtersRef.current, searchQuery: localSearch });
       }
     }, 300);
     return () => {

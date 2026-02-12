@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowUpRight, Users, Building2, Wallet } from 'lucide-react';
+import { cachedFetch, getCached } from '../../utils/apiCache';
 
 interface AdminStats {
   totalAssetsValue: string;
@@ -27,25 +28,25 @@ const StatCard = ({ title, value, change, icon: Icon, color }: any) => (
 );
 
 const AdminDashboard: React.FC = () => {
-  const [stats, setStats] = useState<AdminStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [recentActivity, setRecentActivity] = useState<any[]>([]);
+  const [stats, setStats] = useState<AdminStats | null>(() => getCached('admin:stats')?.data || null);
+  const [loading, setLoading] = useState(!getCached('admin:stats'));
+  const [recentActivity, setRecentActivity] = useState<any[]>(() => getCached('admin:recent-activity') || []);
 
   useEffect(() => {
     const fetchStats = async () => {
       try {
         const token = localStorage.getItem('access_token') || localStorage.getItem('supabase.auth.token');
-        const response = await fetch('/api/admin/stats', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+        const data = await cachedFetch('admin:stats', async () => {
+          const response = await fetch('/api/admin/stats', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          if (!response.ok) throw new Error('Failed to fetch admin stats');
+          return response.json();
         });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success) {
-            setStats(data.data);
-          }
+        if (data.success) {
+          setStats(data.data);
         }
       } catch (error) {
         console.error('Error fetching admin stats:', error);
@@ -61,17 +62,17 @@ const AdminDashboard: React.FC = () => {
     const fetchRecentActivity = async () => {
       try {
         const token = localStorage.getItem('access_token') || localStorage.getItem('supabase.auth.token');
-        const response = await fetch('/api/admin/transactions?limit=5', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+        const data = await cachedFetch('admin:recent-activity', async () => {
+          const response = await fetch('/api/admin/transactions?limit=5', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          if (!response.ok) throw new Error('Failed to fetch activity');
+          return response.json();
         });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.data) {
-            setRecentActivity(data.data);
-          }
+        if (data.success && data.data) {
+          setRecentActivity(data.data);
         }
       } catch (error) {
         console.error('Error fetching recent activity:', error);

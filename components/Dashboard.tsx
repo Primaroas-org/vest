@@ -5,6 +5,10 @@ import { ViewState } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { SkeletonCard, SkeletonTable, SkeletonGraph, SkeletonList, SkeletonGrid, SkeletonText } from './Skeletons';
 import { cachedFetch, getCached, invalidateDashboardCache } from '../utils/apiCache';
+import DepositPage from './Wallet/DepositPage';
+import DepositConfirmation from './Wallet/DepositConfirmation';
+import WithdrawPage from './Wallet/WithdrawPage';
+import WithdrawConfirmation from './Wallet/WithdrawConfirmation';
 
 interface DashboardProps {
     onNavigate: (view: ViewState) => void;
@@ -510,6 +514,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                     <Route path="/holdings" element={<HoldingsView />} />
                     <Route path="/performance" element={<PerformanceView />} />
                     <Route path="/wallet" element={<WalletView />} />
+                    <Route path="/wallet/deposit" element={<DepositPage />} />
+                    <Route path="/wallet/deposit/confirm" element={<DepositConfirmation />} />
+                    <Route path="/wallet/withdraw" element={<WithdrawPage />} />
+                    <Route path="/wallet/withdraw/confirm" element={<WithdrawConfirmation />} />
                     <Route path="/transactions" element={<TransactionsView />} />
                     <Route path="/settings" element={<SettingsView />} />
                 </Routes>
@@ -971,12 +979,10 @@ const OverviewView: React.FC<{ onNavigate: (view: ViewState) => void }> = ({ onN
 const WalletView: React.FC = () => {
     const { dict } = useLanguage();
     const { user } = useAuth();
+    const navigate = useNavigate();
     const [balance, setBalance] = useState<number>(user?.balance || 0);
     const [loading, setLoading] = useState(false);
-    const [showDepositModal, setShowDepositModal] = useState(false);
-    const [showWithdrawModal, setShowWithdrawModal] = useState(false);
     const [showAddCardModal, setShowAddCardModal] = useState(false);
-    const [amount, setAmount] = useState('');
     const [error, setError] = useState('');
     const [cards, setCards] = useState<any[]>(() => getCached('dashboard:cards') || []);
     const [cardsLoading, setCardsLoading] = useState(!getCached('dashboard:cards'));
@@ -1023,123 +1029,6 @@ const WalletView: React.FC = () => {
         fetchCards();
     }, [user]);
 
-    const handleDeposit = async () => {
-        const depositAmount = parseFloat(amount);
-        if (!depositAmount || depositAmount <= 0) {
-            setError('Please enter a valid amount');
-            return;
-        }
-
-        setLoading(true);
-        setError('');
-
-        try {
-            const token = localStorage.getItem('supabase.auth.token');
-            const response = await fetch('/api/wallet/deposit', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ amount: depositAmount })
-            });
-
-            const data = await response.json();
-
-            if (response.ok && data.success) {
-                const newBalance = parseFloat(data.data.new_balance);
-                setBalance(newBalance);
-                setAmount('');
-                setShowDepositModal(false);
-                // Refresh user data in AuthContext
-                if (user) {
-                    user.balance = newBalance;
-                    // Trigger a refresh by fetching user profile
-                    const { supabase } = await import('../utils/supabase');
-                    const { data: { session } } = await supabase.auth.getSession();
-                    if (session?.user) {
-                        const { data: profile } = await supabase
-                            .from('users')
-                            .select('wallet_balance')
-                            .eq('id', session.user.id)
-                            .single();
-                        if (profile) {
-                            user.balance = parseFloat(profile.wallet_balance || '0');
-                        }
-                    }
-                }
-            } else {
-                setError(data.error || 'Failed to deposit funds');
-            }
-        } catch (err) {
-            setError('An error occurred. Please try again.');
-            console.error('Deposit error:', err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleWithdraw = async () => {
-        const withdrawAmount = parseFloat(amount);
-        if (!withdrawAmount || withdrawAmount <= 0) {
-            setError('Please enter a valid amount');
-            return;
-        }
-
-        if (withdrawAmount > balance) {
-            setError('Insufficient balance');
-            return;
-        }
-
-        setLoading(true);
-        setError('');
-
-        try {
-            const token = localStorage.getItem('supabase.auth.token');
-            const response = await fetch('/api/wallet/withdraw', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ amount: withdrawAmount })
-            });
-
-            const data = await response.json();
-
-            if (response.ok && data.success) {
-                const newBalance = parseFloat(data.data.new_balance);
-                setBalance(newBalance);
-                setAmount('');
-                setShowWithdrawModal(false);
-                // Refresh user data in AuthContext
-                if (user) {
-                    user.balance = newBalance;
-                    // Trigger a refresh by fetching user profile
-                    const { supabase } = await import('../utils/supabase');
-                    const { data: { session } } = await supabase.auth.getSession();
-                    if (session?.user) {
-                        const { data: profile } = await supabase
-                            .from('users')
-                            .select('wallet_balance')
-                            .eq('id', session.user.id)
-                            .single();
-                        if (profile) {
-                            user.balance = parseFloat(profile.wallet_balance || '0');
-                        }
-                    }
-                }
-            } else {
-                setError(data.error || 'Failed to withdraw funds');
-            }
-        } catch (err) {
-            setError('An error occurred. Please try again.');
-            console.error('Withdraw error:', err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
     return (
         <div className="space-y-8">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -1164,13 +1053,13 @@ const WalletView: React.FC = () => {
 
                         <div className="mt-8 flex gap-4">
                             <button
-                                onClick={() => setShowDepositModal(true)}
+                                onClick={() => navigate('/dashboard/wallet/deposit')}
                                 className="flex-1 bg-emerald-green hover:bg-emerald-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-emerald-green/20 transition-all active:scale-95"
                             >
                                 {dict.dashboard.wallet.deposit}
                             </button>
                             <button
-                                onClick={() => setShowWithdrawModal(true)}
+                                onClick={() => navigate('/dashboard/wallet/withdraw')}
                                 className="flex-1 bg-white/10 hover:bg-white/20 text-white py-3 rounded-xl font-bold backdrop-blur-sm transition-all active:scale-95"
                             >
                                 {dict.dashboard.wallet.withdraw}
@@ -1255,98 +1144,6 @@ const WalletView: React.FC = () => {
                     )}
                 </div>
             </div>
-
-            {/* Deposit Modal */}
-            {showDepositModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowDepositModal(false)}>
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">{dict.dashboard.wallet.deposit}</h3>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Amount (₮)</label>
-                                <input
-                                    type="number"
-                                    value={amount}
-                                    onChange={(e) => setAmount(e.target.value)}
-                                    className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-emerald-400 text-gray-900 dark:text-white"
-                                    placeholder="Enter amount"
-                                    min="0"
-                                    step="0.01"
-                                />
-                            </div>
-                            {error && (
-                                <p className="text-red-500 text-sm">{error}</p>
-                            )}
-                            <div className="flex gap-4">
-                                <button
-                                    onClick={() => {
-                                        setShowDepositModal(false);
-                                        setAmount('');
-                                        setError('');
-                                    }}
-                                    className="flex-1 px-4 py-3 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={handleDeposit}
-                                    disabled={loading}
-                                    className="flex-1 px-4 py-3 rounded-xl bg-emerald-500 dark:bg-emerald-600 text-white font-bold hover:bg-emerald-600 dark:hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                                >
-                                    {loading ? 'Processing...' : dict.dashboard.wallet.deposit}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Withdraw Modal */}
-            {showWithdrawModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowWithdrawModal(false)}>
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">{dict.dashboard.wallet.withdraw}</h3>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Amount (₮)</label>
-                                <input
-                                    type="number"
-                                    value={amount}
-                                    onChange={(e) => setAmount(e.target.value)}
-                                    className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-emerald-400 text-gray-900 dark:text-white"
-                                    placeholder="Enter amount"
-                                    min="0"
-                                    max={balance}
-                                    step="0.01"
-                                />
-                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Available: ₮ {balance.toLocaleString()}</p>
-                            </div>
-                            {error && (
-                                <p className="text-red-500 text-sm">{error}</p>
-                            )}
-                            <div className="flex gap-4">
-                                <button
-                                    onClick={() => {
-                                        setShowWithdrawModal(false);
-                                        setAmount('');
-                                        setError('');
-                                    }}
-                                    className="flex-1 px-4 py-3 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={handleWithdraw}
-                                    disabled={loading}
-                                    className="flex-1 px-4 py-3 rounded-xl bg-emerald-500 dark:bg-emerald-600 text-white font-bold hover:bg-emerald-600 dark:hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                                >
-                                    {loading ? 'Processing...' : dict.dashboard.wallet.withdraw}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* Add Card Modal */}
             {showAddCardModal && (

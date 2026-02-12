@@ -167,9 +167,12 @@ const MainContent: React.FC = () => {
 
   const handleFilterChange = useCallback((newFilters: FilterState) => {
     setFilters(newFilters);
-    // Reset to page 1 when filters change
-    setSearchParams({ page: '1' });
-  }, [setSearchParams]);
+    // Reset to page 1 when filters change, but only update URL if not already on page 1
+    // to avoid unnecessary re-renders that cause input focus loss
+    if (searchParams.get('page') && searchParams.get('page') !== '1') {
+      setSearchParams({ page: '1' });
+    }
+  }, [searchParams, setSearchParams]);
 
   const itemsPerPage = 3;
   const totalPages = Math.ceil(filteredProperties.length / itemsPerPage);
