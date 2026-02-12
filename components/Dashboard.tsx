@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation, Routes, Route } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { ViewState } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { SkeletonCard, SkeletonTable, SkeletonGraph, SkeletonList, SkeletonGrid, SkeletonText } from './Skeletons';
+import { cachedFetch, getCached, invalidateDashboardCache } from '../utils/apiCache';
 
 interface DashboardProps {
     onNavigate: (view: ViewState) => void;
@@ -186,18 +187,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         }
     }, [user?.kycStatus]);
 
+    // Use ref to track if initial notification fetch happened, avoid re-fetching on user object changes
+    const notificationsFetchedRef = useRef(false);
+    
     useEffect(() => {
+        const token = localStorage.getItem('supabase.auth.token');
+        
         const fetchUnreadCount = async () => {
-            if (!user) return;
+            if (!user || !token) return;
 
             try {
-                // Get fresh token from Supabase session
-                const { supabase } = await import('../utils/supabase');
-                const { data: { session } } = await supabase.auth.getSession();
-                const token = session?.access_token || localStorage.getItem('supabase.auth.token');
-
-                if (!token) return;
-
                 const response = await fetch('/api/notifications?unread_only=true', {
                     headers: {
                         'Authorization': `Bearer ${token}`,
@@ -208,12 +207,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 if (response.ok) {
                     const data = await response.json();
                     setUnreadCount(data.data?.length || 0);
-                } else if (response.status === 401) {
-                    // Token expired, try to refresh
-                    const { data: { session: newSession } } = await supabase.auth.refreshSession();
-                    if (newSession?.access_token) {
-                        localStorage.setItem('supabase.auth.token', newSession.access_token);
-                    }
                 }
             } catch (error) {
                 console.error('Error fetching unread count:', error);
@@ -221,16 +214,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         };
 
         const fetchAllNotifications = async () => {
-            if (!user || !showNotifications) return;
+            if (!user || !showNotifications || !token) return;
 
             try {
-                // Get fresh token from Supabase session
-                const { supabase } = await import('../utils/supabase');
-                const { data: { session } } = await supabase.auth.getSession();
-                const token = session?.access_token || localStorage.getItem('supabase.auth.token');
-
-                if (!token) return;
-
                 const response = await fetch('/api/notifications', {
                     headers: {
                         'Authorization': `Bearer ${token}`,
@@ -241,26 +227,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 if (response.ok) {
                     const data = await response.json();
                     setNotifications(data.data || []);
-                } else if (response.status === 401) {
-                    // Token expired, try to refresh
-                    const { data: { session: newSession } } = await supabase.auth.refreshSession();
-                    if (newSession?.access_token) {
-                        localStorage.setItem('supabase.auth.token', newSession.access_token);
-                    }
                 }
             } catch (error) {
                 console.error('Error fetching notifications:', error);
             }
         };
 
-        fetchUnreadCount();
+        if (user && !notificationsFetchedRef.current) {
+            fetchUnreadCount();
+            notificationsFetchedRef.current = true;
+        }
         if (showNotifications) {
             fetchAllNotifications();
         }
         // Refresh unread count every 30 seconds
         const interval = setInterval(fetchUnreadCount, 30000);
         return () => clearInterval(interval);
-    }, [user, showNotifications]);
+    }, [user?.id, showNotifications]);
 
     // Get active tab from current path
     const getActiveTab = (): DashboardTab => {
@@ -539,29 +522,31 @@ const OverviewView: React.FC<{ onNavigate: (view: ViewState) => void }> = ({ onN
     const { dict } = useLanguage();
     const { user } = useAuth();
     const navigate = useNavigate();
-    const [stats, setStats] = useState<any>(null);
-    const [graphData, setGraphData] = useState<any[]>([]);
+    
+    // Initialize from cache to avoid loading flash on revisit
+    const [stats, setStats] = useState<any>(() => getCached('dashboard:stats'));
+    const [graphData, setGraphData] = useState<any[]>(() => getCached('dashboard:graph:yearly') || []);
     const [graphPeriod, setGraphPeriod] = useState<'yearly' | 'monthly' | 'weekly'>('yearly');
-    const [assetBreakdown, setAssetBreakdown] = useState<any>(null);
-    const [assetBreakdownLoading, setAssetBreakdownLoading] = useState(true);
-    const [loading, setLoading] = useState(true);
+    const [assetBreakdown, setAssetBreakdown] = useState<any>(() => getCached('dashboard:asset-breakdown'));
+    const [assetBreakdownLoading, setAssetBreakdownLoading] = useState(!getCached('dashboard:asset-breakdown'));
+    const [loading, setLoading] = useState(!getCached('dashboard:stats'));
 
     useEffect(() => {
         const fetchStats = async () => {
             if (!user) return;
 
             try {
-                const response = await fetch('/api/dashboard/stats', {
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
-                        'Content-Type': 'application/json'
-                    }
+                const data = await cachedFetch('dashboard:stats', async () => {
+                    const response = await fetch('/api/dashboard/stats', {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) throw new Error('Failed to fetch stats');
+                    return response.json();
                 });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setStats(data);
-                }
+                setStats(data);
             } catch (error) {
                 console.error('Error fetching dashboard stats:', error);
             } finally {
@@ -577,17 +562,17 @@ const OverviewView: React.FC<{ onNavigate: (view: ViewState) => void }> = ({ onN
             if (!user) return;
 
             try {
-                const response = await fetch(`/api/dashboard/performance/graph?period=${graphPeriod}`, {
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
-                        'Content-Type': 'application/json'
-                    }
+                const data = await cachedFetch(`dashboard:graph:${graphPeriod}`, async () => {
+                    const response = await fetch(`/api/dashboard/performance/graph?period=${graphPeriod}`, {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) throw new Error('Failed to fetch graph');
+                    return response.json();
                 });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setGraphData(data.dataPoints || []);
-                }
+                setGraphData(data.dataPoints || []);
             } catch (error) {
                 console.error('Error fetching graph data:', error);
             }
@@ -604,21 +589,22 @@ const OverviewView: React.FC<{ onNavigate: (view: ViewState) => void }> = ({ onN
             }
 
             try {
-                setAssetBreakdownLoading(true);
-                const response = await fetch('/api/dashboard/asset-breakdown', {
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setAssetBreakdown(data);
-                } else {
-                    // If error, set empty breakdown
-                    setAssetBreakdown({ assetTypes: [], totalInvested: 0, growthPercentage: 0 });
+                if (!getCached('dashboard:asset-breakdown')) {
+                    setAssetBreakdownLoading(true);
                 }
+                const data = await cachedFetch('dashboard:asset-breakdown', async () => {
+                    const response = await fetch('/api/dashboard/asset-breakdown', {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) {
+                        return { assetTypes: [], totalInvested: 0, growthPercentage: 0 };
+                    }
+                    return response.json();
+                });
+                setAssetBreakdown(data);
             } catch (error) {
                 console.error('Error fetching asset breakdown:', error);
                 setAssetBreakdown({ assetTypes: [], totalInvested: 0, growthPercentage: 0 });
@@ -992,8 +978,8 @@ const WalletView: React.FC = () => {
     const [showAddCardModal, setShowAddCardModal] = useState(false);
     const [amount, setAmount] = useState('');
     const [error, setError] = useState('');
-    const [cards, setCards] = useState<any[]>([]);
-    const [cardsLoading, setCardsLoading] = useState(true);
+    const [cards, setCards] = useState<any[]>(() => getCached('dashboard:cards') || []);
+    const [cardsLoading, setCardsLoading] = useState(!getCached('dashboard:cards'));
     const [cardForm, setCardForm] = useState({
         bank_name: '',
         last_four_digits: '',
@@ -1016,17 +1002,17 @@ const WalletView: React.FC = () => {
 
             try {
                 const token = localStorage.getItem('supabase.auth.token');
-                const response = await fetch('/api/cards', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    }
+                const data = await cachedFetch('dashboard:cards', async () => {
+                    const response = await fetch('/api/cards', {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) throw new Error('Failed to fetch cards');
+                    return response.json();
                 });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setCards(data.data || []);
-                }
+                setCards(data.data || []);
             } catch (error) {
                 console.error('Error fetching cards:', error);
             } finally {
@@ -1503,8 +1489,8 @@ const WalletView: React.FC = () => {
 const TransactionsView: React.FC = () => {
     const { dict } = useLanguage();
     const { user } = useAuth();
-    const [transactions, setTransactions] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [transactions, setTransactions] = useState<any[]>(() => getCached('dashboard:transactions') || []);
+    const [loading, setLoading] = useState(!getCached('dashboard:transactions'));
 
     useEffect(() => {
         const fetchTransactions = async () => {
@@ -1512,17 +1498,17 @@ const TransactionsView: React.FC = () => {
 
             try {
                 const token = localStorage.getItem('supabase.auth.token');
-                const response = await fetch('/api/user/transactions?limit=100', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    }
+                const data = await cachedFetch('dashboard:transactions', async () => {
+                    const response = await fetch('/api/user/transactions?limit=100', {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) throw new Error('Failed to fetch transactions');
+                    return response.json();
                 });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setTransactions(data.data || []);
-                }
+                setTransactions(data.data || []);
             } catch (error) {
                 console.error('Error fetching transactions:', error);
             } finally {
@@ -1631,25 +1617,25 @@ const TransactionsView: React.FC = () => {
 const AssetsView: React.FC = () => {
     const { dict } = useLanguage();
     const { user } = useAuth();
-    const [assets, setAssets] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [assets, setAssets] = useState<any[]>(() => getCached('dashboard:assets') || []);
+    const [loading, setLoading] = useState(!getCached('dashboard:assets'));
 
     useEffect(() => {
         const fetchAssets = async () => {
             if (!user) return;
 
             try {
-                const response = await fetch('/api/dashboard/assets', {
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
-                        'Content-Type': 'application/json'
-                    }
+                const data = await cachedFetch('dashboard:assets', async () => {
+                    const response = await fetch('/api/dashboard/assets', {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) throw new Error('Failed to fetch assets');
+                    return response.json();
                 });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setAssets(data.assets || []);
-                }
+                setAssets(data.assets || []);
             } catch (error) {
                 console.error('Error fetching assets:', error);
             } finally {

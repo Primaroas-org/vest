@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo, ReactNode } from 'react';
 import { supabase } from '../utils/supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 
@@ -12,6 +12,10 @@ interface User {
   balance: number;
 }
 
+// Session timeout constants (5 minutes total, warn at 4 minutes)
+export const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+export const WARNING_TIME_MS = 4 * 60 * 1000; // 4 minutes (warn 1 minute before)
+
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
@@ -21,9 +25,9 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<{ error?: string }>;
   refreshUser: () => Promise<void>;
   loading: boolean;
-  sessionTimeout: number | null; // Time remaining in seconds, null if not authenticated
   showTimeoutWarning: boolean; // Whether to show the warning modal
   resetSessionTimeout: () => void; // Reset the timeout on user activity
+  getLastActivityTime: () => number; // Get the last activity timestamp for local countdown
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -35,16 +39,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const fetchingProfileRef = useRef<Promise<void> | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
   
-  // Session timeout state
-  const [sessionTimeout, setSessionTimeout] = useState<number | null>(null);
+  // Session timeout state - only boolean warning, no countdown in context (avoids re-renders)
   const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const warningTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
-  
-  // Session timeout constants (5 minutes total, warn at 4 minutes)
-  const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-  const WARNING_TIME_MS = 4 * 60 * 1000; // 4 minutes (warn 1 minute before)
 
   useEffect(() => {
     // Handle email confirmation callback
@@ -62,9 +61,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (error) {
           console.error('Error setting session from email confirmation:', error);
-        } else if (data.session) {
+        } else         if (data.session) {
           // Clear the hash from URL
           window.history.replaceState(null, '', window.location.pathname);
+          // Reset activity timer on email confirmation
+          lastActivityRef.current = Date.now();
           // Fetch user profile
           await fetchUserProfile(data.session.user);
         }
@@ -80,35 +81,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // This ensures fast auth state restoration
     const initializeAuth = async () => {
       try {
-        // Check localStorage first for cached token
-        const cachedToken = localStorage.getItem('supabase.auth.token');
-
-        // Get session from Supabase (this is fast if session exists)
+        // Get session from Supabase (this handles persistence automatically)
         const { data: { session }, error } = await supabase.auth.getSession();
 
         if (error) {
           console.error('Error getting session:', error);
-          localStorage.removeItem('supabase.auth.token');
           setUser(null);
           setLoading(false);
           return;
         }
 
         if (session?.user && session?.access_token) {
-          // Cache the token immediately
+          // Cache the token for API calls (Supabase handles its own persistence)
           localStorage.setItem('supabase.auth.token', session.access_token);
           sessionHandledRef.current = true;
           currentUserIdRef.current = session.user.id;
+          // Reset activity timer when session is restored
+          lastActivityRef.current = Date.now();
           await fetchUserProfile(session.user);
         } else {
           // No session
-          localStorage.removeItem('supabase.auth.token');
           setUser(null);
           sessionHandledRef.current = true;
         }
       } catch (error) {
         console.error('Error initializing auth:', error);
-        localStorage.removeItem('supabase.auth.token');
         setUser(null);
         sessionHandledRef.current = true;
       } finally {
@@ -139,6 +136,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           console.log('Processing sign in for user:', session.user.id);
           // Store the access token for API calls
           localStorage.setItem('supabase.auth.token', session.access_token);
+          // Reset activity timer on sign in
+          lastActivityRef.current = Date.now();
           // fetchUserProfile will handle duplicate prevention internally
           await fetchUserProfile(session.user);
           console.log('Finished fetching user profile');
@@ -157,6 +156,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // Handle user updates (e.g., email confirmation)
         if (session?.user && session?.access_token) {
           localStorage.setItem('supabase.auth.token', session.access_token);
+          lastActivityRef.current = Date.now();
           await fetchUserProfile(session.user);
         }
       }
@@ -193,12 +193,94 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         console.log('Fetching user profile for ID:', supabaseUser.id);
 
-        // Create a timeout that actually rejects after 10 seconds (increased from 3)
-        // This gives more time for the database query to complete
+        // Try API endpoint first (much faster, uses Drizzle ORM directly)
+        // Get token from session or localStorage
+        let token = localStorage.getItem('supabase.auth.token');
+        if (!token) {
+          const { data: { session } } = await supabase.auth.getSession();
+          token = session?.access_token || null;
+          if (token) {
+            localStorage.setItem('supabase.auth.token', token);
+          }
+        }
+        
+        // Only try API if we have a token
+        if (token) {
+          try {
+            const apiResponse = await fetch('/api/user/me', {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+          if (apiResponse.ok) {
+            const result = await apiResponse.json();
+            if (result.success && result.data) {
+              const apiUser = result.data;
+              const userData: User = {
+                id: apiUser.id,
+                name: apiUser.full_name || supabaseUser.user_metadata?.full_name || supabaseUser.email?.split('@')[0] || 'User',
+                email: apiUser.email || supabaseUser.email || '',
+                avatar: supabaseUser.user_metadata?.avatar_url,
+                isVerified: apiUser.kyc_status === 'verified' || false,
+                kycStatus: apiUser.kyc_status ? (apiUser.kyc_status as 'pending' | 'verified' | 'rejected') : undefined,
+                balance: parseFloat(apiUser.wallet_balance || '0')
+              };
+              console.log('User profile loaded from API:', userData);
+              lastActivityRef.current = Date.now();
+              setUser(userData);
+              console.log('User state set successfully');
+              return;
+            }
+          } else if (apiResponse.status === 404) {
+            // User doesn't exist in database, create it
+            console.log('User not found in database (404), creating user record...');
+            await createUserFromAuth(supabaseUser);
+            // Wait a moment for the database to process
+            await new Promise(resolve => setTimeout(resolve, 500));
+            // Retry API call
+            const retryResponse = await fetch('/api/user/me', {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            if (retryResponse.ok) {
+              const retryResult = await retryResponse.json();
+              if (retryResult.success && retryResult.data) {
+                const apiUser = retryResult.data;
+                const userData: User = {
+                  id: apiUser.id,
+                  name: apiUser.full_name || supabaseUser.user_metadata?.full_name || 'User',
+                  email: apiUser.email || supabaseUser.email || '',
+                  avatar: supabaseUser.user_metadata?.avatar_url,
+                  isVerified: apiUser.kyc_status === 'verified' || false,
+                  kycStatus: apiUser.kyc_status ? (apiUser.kyc_status as 'pending' | 'verified' | 'rejected') : undefined,
+                  balance: parseFloat(apiUser.wallet_balance || '0')
+                };
+                console.log('User profile loaded after creation:', userData);
+                lastActivityRef.current = Date.now();
+                setUser(userData);
+                return;
+              }
+            }
+          }
+          console.log('API call failed or returned unexpected result, falling back to Supabase query');
+          } catch (apiError) {
+            console.log('API call error, falling back to Supabase query:', apiError);
+          }
+        } else {
+          console.log('No token available, using Supabase query');
+        }
+
+        // Fallback to Supabase query if API fails (with shorter timeout)
         const timeoutPromise = new Promise<never>((_, reject) =>
           setTimeout(() => {
             reject(new Error('TIMEOUT'));
-          }, 10000)
+          }, 3000) // Reduced to 3 seconds since API should handle most cases
         );
 
         const queryPromise = supabase
@@ -207,20 +289,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           .eq('id', supabaseUser.id)
           .single();
 
-        // Race between query and timeout - if timeout wins, we'll catch and use fallback
+        // Race between query and timeout
         let profile, error;
         try {
           const result = await Promise.race([queryPromise, timeoutPromise]);
-          // If we got here, query completed (timeout didn't win)
           profile = result.data;
           error = result.error;
         } catch (timeoutError: any) {
           if (timeoutError?.message === 'TIMEOUT' || timeoutError?.message?.includes('timeout')) {
-            console.error('Profile query timed out after 10 seconds - using fallback user');
+            console.error('Profile query timed out after 3 seconds');
             error = { code: 'TIMEOUT', message: 'Query timeout' };
             profile = null;
           } else {
-            // Some other error occurred
             throw timeoutError;
           }
         }
@@ -233,7 +313,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           // Handle timeout - preserve existing user balance if available
           if (error.code === 'TIMEOUT') {
             console.log('Query timed out, setting fallback user');
-            // Preserve existing balance if user was already loaded
             const existingBalance = user?.balance || 0;
             const fallbackUser: User = {
               id: supabaseUser.id,
@@ -244,6 +323,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               balance: existingBalance
             };
             console.log('Setting fallback user due to timeout (preserving balance):', fallbackUser);
+            lastActivityRef.current = Date.now();
             setUser(fallbackUser);
             return;
           }
@@ -252,11 +332,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           if (error.code === 'PGRST116') {
             console.log('User not found in database, creating user record...');
             await createUserFromAuth(supabaseUser);
-
-            // Wait a moment for the database to process
             await new Promise(resolve => setTimeout(resolve, 500));
-
-            // Retry fetching after creating
             console.log('Retrying profile fetch after creation...');
             const { data: newProfile, error: retryError } = await supabase
               .from('users')
@@ -264,12 +340,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               .eq('id', supabaseUser.id)
               .single();
 
-            console.log('Retry result:', { newProfile, retryError });
-
             if (retryError) {
               console.error('Error fetching profile after creation:', retryError);
-              // Even if retry fails, set a basic user object so login can proceed
-              // Preserve existing balance if user was already loaded
               const existingBalance = user?.balance || 0;
               const fallbackUser: User = {
                 id: supabaseUser.id,
@@ -280,6 +352,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 balance: existingBalance
               };
               console.log('Setting fallback user due to retry error (preserving balance):', fallbackUser);
+              lastActivityRef.current = Date.now();
               setUser(fallbackUser);
               return;
             }
@@ -294,12 +367,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               balance: parseFloat(newProfile?.wallet_balance || '0')
             };
             console.log('User profile loaded after creation:', userData);
+            lastActivityRef.current = Date.now();
             setUser(userData);
             return;
           }
+          
           console.error('Non-recoverable error fetching profile, code:', error.code);
-          // Even on error, set a basic user object so login can proceed
-          // Preserve existing balance if user was already loaded
           const existingBalance = user?.balance || 0;
           const fallbackUser: User = {
             id: supabaseUser.id,
@@ -310,6 +383,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             balance: existingBalance
           };
           console.log('Setting fallback user due to non-recoverable error (preserving balance):', fallbackUser);
+          lastActivityRef.current = Date.now();
           setUser(fallbackUser);
           return;
         }
@@ -325,6 +399,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
 
         console.log('User profile loaded:', userData);
+        lastActivityRef.current = Date.now();
         setUser(userData);
         console.log('User state set successfully');
       } catch (error) {
@@ -341,6 +416,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           balance: existingBalance
         };
         console.log('Setting fallback user due to exception (preserving balance):', fallbackUser);
+        lastActivityRef.current = Date.now();
         setUser(fallbackUser);
       } finally {
         console.log('Profile fetch completed, clearing refs');
@@ -412,6 +488,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Session should be automatically established, but ensure we have it
       if (data.session) {
         localStorage.setItem('supabase.auth.token', data.session.access_token);
+        // Reset activity timer on login
+        lastActivityRef.current = Date.now();
         await fetchUserProfile(data.user);
       }
 
@@ -454,6 +532,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // If session is created immediately (email confirmation disabled)
       if (data.session && data.user) {
         localStorage.setItem('supabase.auth.token', data.session.access_token);
+        // Reset activity timer on registration
+        lastActivityRef.current = Date.now();
         // Wait a bit for the trigger to create the user record
         setTimeout(async () => {
           await fetchUserProfile(data.user);
@@ -467,14 +547,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await supabase.auth.signOut();
       setUser(null);
     } catch (error) {
       console.error('Error logging out:', error);
     }
-  };
+  }, []);
 
   const resetPassword = async (email: string) => {
     try {
@@ -525,6 +605,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             };
             console.log('[AuthContext] User profile refreshed from API:', userData);
             console.log('[AuthContext] Setting user state with kycStatus:', userData.kycStatus);
+            // Reset activity timer when refreshing user
+            lastActivityRef.current = Date.now();
             // Force state update by creating a new object reference
             setUser({ ...userData });
             return;
@@ -552,6 +634,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
   };
+
+  // Get last activity time for local countdown in UI components
+  const getLastActivityTime = useCallback(() => lastActivityRef.current, []);
 
   // Reset session timeout on user activity
   const resetSessionTimeout = useCallback(() => {
@@ -581,10 +666,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }, SESSION_TIMEOUT_MS);
   }, [user, logout]);
 
-  // Update timeout countdown display
+  // Clean up timeouts when user logs out
   useEffect(() => {
     if (!user) {
-      setSessionTimeout(null);
       setShowTimeoutWarning(false);
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -594,38 +678,33 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         clearTimeout(warningTimeoutRef.current);
         warningTimeoutRef.current = null;
       }
-      return;
     }
-
-    const updateCountdown = () => {
-      const elapsed = Date.now() - lastActivityRef.current;
-      const remaining = Math.max(0, SESSION_TIMEOUT_MS - elapsed);
-      const secondsRemaining = Math.ceil(remaining / 1000);
-      setSessionTimeout(secondsRemaining);
-    };
-
-    // Update immediately
-    updateCountdown();
-
-    // Update every second
-    const interval = setInterval(updateCountdown, 1000);
-
-    return () => clearInterval(interval);
   }, [user]);
 
-  // Set up activity listeners
+  // Set up activity listeners with throttling to avoid excessive calls
   useEffect(() => {
     if (!user) return;
 
-    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    const activityEvents = ['mousedown', 'keypress', 'scroll', 'touchstart', 'click'];
+    // Note: 'mousemove' removed - too frequent, other events are sufficient
+    
+    let lastThrottledCall = 0;
+    const THROTTLE_MS = 30000; // Only reset timeout at most every 30 seconds on activity
     
     const handleActivity = () => {
-      resetSessionTimeout();
+      const now = Date.now();
+      if (now - lastThrottledCall >= THROTTLE_MS) {
+        lastThrottledCall = now;
+        resetSessionTimeout();
+      } else {
+        // Still update lastActivity for UI countdown accuracy, but don't reset timeouts
+        lastActivityRef.current = Date.now();
+      }
     };
 
-    // Add event listeners
+    // Add event listeners with passive flag for better scroll performance
     activityEvents.forEach(event => {
-      document.addEventListener(event, handleActivity, true);
+      document.addEventListener(event, handleActivity, { capture: true, passive: true });
     });
 
     // Initialize timeout
@@ -644,20 +723,47 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, [user, resetSessionTimeout]);
 
+  // Safeguard: Check for session restoration if user is null but session exists
+  // This handles cases where session wasn't properly restored on initial load
+  useEffect(() => {
+    if (!loading && !user && !sessionHandledRef.current) {
+      // Only check once after loading completes
+      const checkSession = async () => {
+        try {
+          const { data: { session }, error } = await supabase.auth.getSession();
+          if (!error && session?.user && session?.access_token) {
+            console.log('[AuthContext] Found existing session, restoring user...');
+            localStorage.setItem('supabase.auth.token', session.access_token);
+            lastActivityRef.current = Date.now();
+            await fetchUserProfile(session.user);
+          }
+        } catch (error) {
+          console.error('[AuthContext] Error checking session:', error);
+        }
+      };
+      // Small delay to avoid race conditions
+      const timer = setTimeout(checkSession, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, user]);
+
+  // Memoize context value to prevent unnecessary consumer re-renders
+  const contextValue = useMemo(() => ({
+    user,
+    isAuthenticated: !!user,
+    login,
+    logout,
+    register,
+    resetPassword,
+    refreshUser,
+    loading,
+    showTimeoutWarning,
+    resetSessionTimeout,
+    getLastActivityTime
+  }), [user, loading, showTimeoutWarning, logout, resetSessionTimeout, getLastActivityTime]);
+
   return (
-    <AuthContext.Provider value={{
-      user,
-      isAuthenticated: !!user,
-      login,
-      logout,
-      register,
-      resetPassword,
-      refreshUser,
-      loading,
-      sessionTimeout,
-      showTimeoutWarning,
-      resetSessionTimeout
-    }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

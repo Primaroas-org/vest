@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, ViewState } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, SESSION_TIMEOUT_MS } from '../contexts/AuthContext';
 
 interface NavbarProps {
   onNavigate: (view: ViewState) => void;
@@ -10,7 +10,27 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView }) => {
   const { dict, language, setLanguage } = useLanguage();
-  const { user, isAuthenticated, logout, sessionTimeout, resetSessionTimeout } = useAuth();
+  const { user, isAuthenticated, logout, resetSessionTimeout, getLastActivityTime } = useAuth();
+  
+  // Local countdown state - only re-renders the Navbar, not the entire app
+  const [sessionTimeout, setSessionTimeout] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      setSessionTimeout(null);
+      return;
+    }
+
+    const updateCountdown = () => {
+      const elapsed = Date.now() - getLastActivityTime();
+      const remaining = Math.max(0, SESSION_TIMEOUT_MS - elapsed);
+      setSessionTimeout(Math.ceil(remaining / 1000));
+    };
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+    return () => clearInterval(interval);
+  }, [user, getLastActivityTime]);
 
   const navLinks: NavLink[] = [
     { label: dict.nav.marketplace, id: 'marketplace', isActive: currentView === 'marketplace' || currentView === 'property-details' },
