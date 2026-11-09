@@ -154,7 +154,7 @@ After running the migrations, verify in Supabase Dashboard:
 
 After database setup:
 
-1. ✅ Configure Supabase Auth (see `README.AUTH.md`)
+1. ✅ Configure Supabase Auth (see [AUTH.md](AUTH.md))
 2. ✅ Set up environment variables (see `.env.example`)
 3. ✅ Start the backend server: `pnpm server:dev`
 4. ✅ Test authentication flow

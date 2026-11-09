@@ -15,24 +15,28 @@ Backend infrastructure for **Vest** - A fractional real estate investment platfo
 
 ```
 vest/
-├── src/
+├── backend/
 │   ├── config/
 │   │   └── supabase.ts          # Supabase client configuration
 │   ├── controllers/
-│   │   ├── investment.controller.ts   # Investment logic
+│   │   ├── investment.controller.ts   # Investment logic (calls process_investment)
 │   │   ├── portfolio.controller.ts    # Portfolio aggregation
+│   │   ├── dashboard.controller.ts    # Investor dashboard data
+│   │   ├── kyc.controller.ts          # KYC submission and document upload
 │   │   └── admin.controller.ts        # Admin operations
+│   ├── db/
+│   │   ├── index.ts             # Drizzle client (postgres.js)
+│   │   └── schema.ts            # Drizzle table definitions and relations
 │   ├── middleware/
 │   │   └── auth.ts              # Authentication & authorization
 │   ├── types/
 │   │   └── index.ts             # TypeScript interfaces
 │   ├── utils/
-│   │   ├── numeric.ts           # MNT currency operations
+│   │   ├── numeric.ts           # MNT currency helpers
 │   │   └── kyc.ts               # e-Mongolia KYC mock
 │   └── server.ts                # Express app & routes
-├── migrations/
-│   └── 001_stored_procedures.sql # Database functions
-├── schema.sql                   # Database schema with RLS
+├── migrations/                  # SQL functions, triggers and later tables (run in order)
+├── schema.sql                   # Core tables, indexes and RLS policies
 ├── .env.example                 # Environment variables template
 └── package.json                 # Dependencies & scripts
 ```
@@ -270,7 +274,7 @@ RLS policies ensure:
 
 ## MNT Currency Handling
 
-All currency operations use the `MNT` utility class to prevent floating-point errors:
+Amounts are stored as `NUMERIC(20, 2)` in PostgreSQL and passed around as strings in TypeScript. Balance changes for investments, dividends and deposits happen inside the SQL functions below. The `MNT` helper is used for portfolio and display math; it currently converts through JavaScript numbers (`parseFloat` + `toFixed(2)`), so it is not suitable for moving money on its own:
 
 ```typescript
 import { MNT } from './utils/numeric';
@@ -292,7 +296,7 @@ MNT.format("5000000.00"); // "5,000,000.00 ₮"
 
 ## e-Mongolia KYC Integration
 
-The current implementation includes a **mock** KYC verification function in `src/utils/kyc.ts`.
+The current implementation includes a **mock** KYC verification function in `backend/utils/kyc.ts`.
 
 For production:
 1. Obtain API credentials from e-Mongolia

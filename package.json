@@ -12,7 +12,7 @@
     "server:dev": "tsx watch backend/server.ts",
     "server:build": "tsc -p tsconfig.server.json",
     "server:start": "node dist/server.js",
-    "db:setup": "echo '\ud83d\udccb Database Setup Instructions:' && echo '1. Go to Supabase Dashboard > SQL Editor' && echo '2. Run: pnpm db:copy-schema (then paste & run in SQL Editor)' && echo '3. Run: pnpm db:copy-functions (then paste & run)' && echo '4. Run: pnpm db:copy-auth-sync (then paste & run)' && echo '5. Run: pnpm db:copy-seed (optional, then paste & run)' && echo '' && echo 'See README.DATABASE.md for detailed instructions.'",
+    "db:setup": "echo '\ud83d\udccb Database Setup Instructions:' && echo '1. Go to Supabase Dashboard > SQL Editor' && echo '2. Run: pnpm db:copy-schema (then paste & run in SQL Editor)' && echo '3. Run: pnpm db:copy-functions (then paste & run)' && echo '4. Run: pnpm db:copy-auth-sync (then paste & run)' && echo '5. Run: pnpm db:copy-seed (optional, then paste & run)' && echo '' && echo 'See docs/DATABASE.md for detailed instructions.'",
     "db:copy-schema": "cat schema.sql | pbcopy && echo '\u2705 Schema copied to clipboard! Paste in Supabase SQL Editor and click Run.'",
     "db:copy-functions": "cat migrations/001_stored_procedures.sql | pbcopy && echo '\u2705 Stored procedures copied to clipboard! Paste in Supabase SQL Editor and click Run.'",
     "db:copy-auth-sync": "cat migrations/002_auth_sync_trigger.sql | pbcopy && echo '\u2705 Auth sync trigger copied to clipboard! Paste in Supabase SQL Editor and click Run.'",
