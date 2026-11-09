@@ -78,9 +78,9 @@ const MainContent: React.FC = () => {
             }
 
             // Get image from images array or use first image
-            const image = Array.isArray(prop.images) && prop.images.length > 0
-              ? prop.images[0]
-              : prop.image || '';
+            // Get all images
+            const allImages: string[] = Array.isArray(prop.images) ? prop.images.map((img: any) => typeof img === 'string' ? img : img?.url || img) : [];
+            const image = allImages.length > 0 ? allImages[0] : prop.image || '';
 
             // Map property type - support both camelCase and snake_case
             const propertyType = prop.propertyType || prop.property_type || 'residential';
@@ -103,6 +103,7 @@ const MainContent: React.FC = () => {
               type: type,
               status: status,
               image: image,
+              images: allImages,
               progress: progress,
               targetReturn: parseFloat(String(expectedAnnualYield)) || 0,
               minInvest: `₮ ${parseFloat(String(pricePerShare)).toLocaleString()}`,
@@ -415,10 +416,9 @@ const MainContent: React.FC = () => {
               status = 'funding';
             }
 
-            // Get image from images array
-            const image = Array.isArray(prop.images) && prop.images.length > 0
-              ? prop.images[0]
-              : prop.image || '';
+            // Get all images
+            const allImages: string[] = Array.isArray(prop.images) ? prop.images.map((img: any) => typeof img === 'string' ? img : img?.url || img) : [];
+            const image = allImages.length > 0 ? allImages[0] : prop.image || '';
 
             // Map property type
             const propertyType = prop.propertyType || prop.property_type || 'residential';
@@ -441,6 +441,7 @@ const MainContent: React.FC = () => {
               type: type,
               status: status,
               image: image,
+              images: allImages,
               progress: progress,
               targetReturn: parseFloat(String(expectedAnnualYield)) || 0,
               minInvest: `₮ ${parseFloat(String(pricePerShare)).toLocaleString()}`,
@@ -584,9 +585,8 @@ const MainContent: React.FC = () => {
                 status = 'funding';
               }
 
-              const image = Array.isArray(prop.images) && prop.images.length > 0
-                ? prop.images[0]
-                : prop.image || '';
+              const allImages: string[] = Array.isArray(prop.images) ? prop.images.map((img: any) => typeof img === 'string' ? img : img?.url || img) : [];
+              const image = allImages.length > 0 ? allImages[0] : prop.image || '';
 
               const propertyType = prop.propertyType || prop.property_type || 'residential';
               let type: 'Residential' | 'Commercial' | 'Mixed Use' = 'Residential';
@@ -607,6 +607,7 @@ const MainContent: React.FC = () => {
                 type: type,
                 status: status,
                 image: image,
+                images: allImages,
                 progress: progress,
                 targetReturn: parseFloat(String(expectedAnnualYield)) || 0,
                 minInvest: `₮ ${parseFloat(String(pricePerShare)).toLocaleString()}`,

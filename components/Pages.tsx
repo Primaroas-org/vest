@@ -1,28 +1,77 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export const HowItWorks: React.FC = () => {
   const { dict } = useLanguage();
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
+
+  const steps = [
+    { icon: 'person_add', title: dict.pages.howStep1, desc: dict.pages.howStep1Desc },
+    { icon: 'apartment', title: dict.pages.howStep2, desc: dict.pages.howStep2Desc },
+    { icon: 'account_balance_wallet', title: dict.pages.howStep3, desc: dict.pages.howStep3Desc },
+    { icon: 'trending_up', title: dict.pages.howStep4, desc: dict.pages.howStep4Desc },
+  ];
+
+  const faqs = [
+    { q: dict.pages.howFaq1Q, a: dict.pages.howFaq1A },
+    { q: dict.pages.howFaq2Q, a: dict.pages.howFaq2A },
+    { q: dict.pages.howFaq3Q, a: dict.pages.howFaq3A },
+  ];
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 min-h-[60vh]">
-      <div className="text-center max-w-3xl mx-auto mb-16">
-        <h2 className="text-4xl font-extrabold text-charcoal dark:text-white font-display mb-6">{dict.pages.howTitle}</h2>
+      {/* Header */}
+      <div className="text-center max-w-3xl mx-auto mb-20">
+        <h2 className="text-4xl md:text-5xl font-extrabold text-charcoal dark:text-white font-display mb-4">{dict.pages.howTitle}</h2>
+        <p className="text-lg text-gray-500 dark:text-gray-400">{dict.pages.howSubtitle}</p>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-        {[
-          { icon: 'app_registration', title: dict.pages.howStep1, desc: dict.pages.howStep1Desc },
-          { icon: 'manage_search', title: dict.pages.howStep2, desc: dict.pages.howStep2Desc },
-          { icon: 'payments', title: dict.pages.howStep3, desc: dict.pages.howStep3Desc }
-        ].map((step, i) => (
-          <div key={i} className="bg-white dark:bg-charcoal p-8 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-800 text-center relative group hover:-translate-y-2 transition-transform">
-             <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-primary text-white w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl shadow-lg border-4 border-white dark:border-charcoal">
-                {i + 1}
-             </div>
-             <span className="material-icons-round text-5xl text-gray-300 group-hover:text-primary transition-colors mb-4 mt-4 block">{step.icon}</span>
-             <h3 className="text-xl font-bold mb-3 text-charcoal dark:text-white">{step.title}</h3>
-             <p className="text-gray-500 dark:text-gray-400">{step.desc}</p>
+
+      {/* Steps - Timeline layout */}
+      <div className="relative max-w-4xl mx-auto mb-24">
+        {/* Vertical line */}
+        <div className="hidden md:block absolute left-1/2 top-0 bottom-0 w-0.5 bg-gradient-to-b from-primary via-primary/50 to-primary/10"></div>
+
+        {steps.map((step, i) => (
+          <div key={i} className={`relative flex items-start gap-8 mb-16 ${i % 2 === 0 ? 'md:flex-row' : 'md:flex-row-reverse'}`}>
+            {/* Content card */}
+            <div className={`flex-1 ${i % 2 === 0 ? 'md:text-right md:pr-12' : 'md:text-left md:pl-12'}`}>
+              <div className="bg-white dark:bg-charcoal p-8 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-800 hover:shadow-xl transition-shadow">
+                <span className="material-icons-round text-4xl text-primary mb-4 block">{step.icon}</span>
+                <h3 className="text-xl font-bold mb-3 text-charcoal dark:text-white">{step.title}</h3>
+                <p className="text-gray-500 dark:text-gray-400 leading-relaxed">{step.desc}</p>
+              </div>
+            </div>
+            {/* Step number */}
+            <div className="hidden md:flex absolute left-1/2 -translate-x-1/2 bg-primary text-white w-12 h-12 rounded-full items-center justify-center font-bold text-xl shadow-lg border-4 border-white dark:border-gray-900 z-10">
+              {i + 1}
+            </div>
+            {/* Spacer for opposite side */}
+            <div className="hidden md:block flex-1"></div>
           </div>
         ))}
+      </div>
+
+      {/* FAQ Section */}
+      <div className="max-w-3xl mx-auto">
+        <h3 className="text-2xl font-bold text-charcoal dark:text-white font-display mb-8 text-center">{dict.pages.howFaqTitle}</h3>
+        <div className="space-y-3">
+          {faqs.map((faq, i) => (
+            <div key={i} className="bg-white dark:bg-charcoal rounded-xl border border-gray-100 dark:border-gray-800 overflow-hidden">
+              <button
+                onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                className="w-full flex items-center justify-between p-5 text-left"
+              >
+                <span className="font-bold text-charcoal dark:text-white pr-4">{faq.q}</span>
+                <span className={`material-icons-round text-primary transition-transform ${openFaq === i ? 'rotate-180' : ''}`}>expand_more</span>
+              </button>
+              {openFaq === i && (
+                <div className="px-5 pb-5 text-gray-500 dark:text-gray-400 leading-relaxed border-t border-gray-100 dark:border-gray-800 pt-4">
+                  {faq.a}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -30,19 +79,34 @@ export const HowItWorks: React.FC = () => {
 
 export const Resources: React.FC = () => {
   const { dict } = useLanguage();
+  const resources = [
+    { title: dict.pages.res1, desc: dict.pages.res1Desc, icon: 'pie_chart', color: 'bg-blue-500' },
+    { title: dict.pages.res2, desc: dict.pages.res2Desc, icon: 'receipt_long', color: 'bg-amber-500' },
+    { title: dict.pages.res3, desc: dict.pages.res3Desc, icon: 'shield', color: 'bg-red-500' },
+    { title: dict.pages.res4, desc: dict.pages.res4Desc, icon: 'payments', color: 'bg-emerald-500' },
+    { title: dict.pages.res5, desc: dict.pages.res5Desc, icon: 'verified_user', color: 'bg-purple-500' },
+    { title: dict.pages.res6, desc: dict.pages.res6Desc, icon: 'analytics', color: 'bg-cyan-500' },
+  ];
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 min-h-[60vh]">
-      <h2 className="text-4xl font-extrabold text-charcoal dark:text-white font-display mb-12 text-center">{dict.pages.resourcesTitle}</h2>
+      <div className="text-center max-w-3xl mx-auto mb-16">
+        <h2 className="text-4xl md:text-5xl font-extrabold text-charcoal dark:text-white font-display mb-4">{dict.pages.resourcesTitle}</h2>
+        <p className="text-lg text-gray-500 dark:text-gray-400">{dict.pages.resourcesSubtitle}</p>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {[dict.pages.res1, dict.pages.res2, dict.pages.res3].map((title, i) => (
-           <div key={i} className="group cursor-pointer">
-              <div className="h-48 bg-gray-200 dark:bg-gray-700 rounded-2xl mb-4 overflow-hidden relative">
-                 <div className="absolute inset-0 bg-primary/20 group-hover:bg-primary/40 transition-colors"></div>
-                 <span className="absolute bottom-4 right-4 bg-white/90 p-2 rounded-full shadow-sm">
-                    <span className="material-icons-round text-primary">arrow_forward</span>
-                 </span>
+        {resources.map((res, i) => (
+           <div key={i} className="group cursor-pointer bg-white dark:bg-charcoal rounded-2xl shadow-lg border border-gray-100 dark:border-gray-800 overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all">
+              <div className={`h-2 ${res.color}`}></div>
+              <div className="p-6">
+                <div className={`${res.color} w-12 h-12 rounded-xl flex items-center justify-center mb-4`}>
+                  <span className="material-icons-round text-white text-2xl">{res.icon}</span>
+                </div>
+                <h3 className="text-lg font-bold text-charcoal dark:text-white group-hover:text-primary transition-colors mb-2">{res.title}</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{res.desc}</p>
+                <div className="mt-4 flex items-center text-primary text-sm font-bold group-hover:gap-2 transition-all">
+                  <span className="material-icons-round text-base mr-1">arrow_forward</span>
+                </div>
               </div>
-              <h3 className="text-xl font-bold text-charcoal dark:text-white group-hover:text-primary transition-colors">{title}</h3>
            </div>
         ))}
       </div>
@@ -52,28 +116,60 @@ export const Resources: React.FC = () => {
 
 export const About: React.FC = () => {
   const { dict } = useLanguage();
+  const values = [
+    { icon: 'visibility', title: dict.pages.aboutValue1, desc: dict.pages.aboutValue1Desc },
+    { icon: 'security', title: dict.pages.aboutValue2, desc: dict.pages.aboutValue2Desc },
+    { icon: 'accessibility_new', title: dict.pages.aboutValue3, desc: dict.pages.aboutValue3Desc },
+  ];
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 min-h-[60vh]">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+      {/* Hero */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center mb-24">
          <div>
-            <h2 className="text-4xl font-extrabold text-charcoal dark:text-white font-display mb-6">{dict.pages.aboutTitle}</h2>
+            <h2 className="text-4xl md:text-5xl font-extrabold text-charcoal dark:text-white font-display mb-6">{dict.pages.aboutTitle}</h2>
             <p className="text-lg text-gray-600 dark:text-gray-300 leading-relaxed mb-6">
                {dict.pages.aboutDesc}
             </p>
             <div className="grid grid-cols-2 gap-6 mt-8">
                <div className="border-l-4 border-primary pl-4">
-                  <p className="text-3xl font-bold text-charcoal dark:text-white mb-1">2023</p>
+                  <p className="text-3xl font-bold text-charcoal dark:text-white mb-1">2024</p>
                   <p className="text-sm text-gray-500">Founded in Ulaanbaatar</p>
                </div>
                <div className="border-l-4 border-primary pl-4">
-                  <p className="text-3xl font-bold text-charcoal dark:text-white mb-1">₮42B+</p>
-                  <p className="text-sm text-gray-500">Assets Tokenized</p>
+                  <p className="text-3xl font-bold text-charcoal dark:text-white mb-1">₮100K</p>
+                  <p className="text-sm text-gray-500">Min. Investment</p>
                </div>
             </div>
          </div>
-         <div className="relative h-[500px] rounded-3xl overflow-hidden shadow-2xl">
-            <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuB8m9Ay_gcICqYNambA7M9ltd2-ipZdoBPxjl-BlhAQ7LD3OuIjSFoFaQaeOMsBqLDL40EECv3E2dzu2aM-9g82kMPIpEwv1cfqXFin3Q7DMoOYwEqi1FJ0VlmPbHdUerdTJQhAYPPL7gWQ8a0GKqE6OKvS9zyEDXCz9ibS4t8LkcTTZzlrM72sUMzW-ZGUqiwIg9LbJTs8r6_Wya-d60YTfVfSPWP5nT4KDd7UX8H6nXladIo5tUjpockgF7BaVq8pPz5SCAZ1qR0" alt="Office" className="absolute inset-0 w-full h-full object-cover" />
+         <div className="relative h-[400px] rounded-3xl overflow-hidden shadow-2xl bg-gradient-to-br from-primary/20 to-emerald-600/30 flex items-center justify-center">
+            <span className="material-icons-round text-[120px] text-primary/50">apartment</span>
          </div>
+      </div>
+
+      {/* Why Vest */}
+      <div className="text-center max-w-3xl mx-auto mb-16">
+        <h3 className="text-3xl font-extrabold text-charcoal dark:text-white font-display mb-4">{dict.pages.aboutWhy}</h3>
+        <p className="text-lg text-gray-500 dark:text-gray-400 leading-relaxed">{dict.pages.aboutWhyDesc}</p>
+      </div>
+
+      {/* Values */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-24">
+        {values.map((v, i) => (
+          <div key={i} className="bg-white dark:bg-charcoal p-8 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-800 text-center hover:-translate-y-1 transition-transform">
+            <div className="bg-emerald-100 dark:bg-emerald-900/30 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <span className="material-icons-round text-3xl text-primary">{v.icon}</span>
+            </div>
+            <h4 className="text-xl font-bold text-charcoal dark:text-white mb-2">{v.title}</h4>
+            <p className="text-gray-500 dark:text-gray-400 leading-relaxed">{v.desc}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Team */}
+      <div className="text-center max-w-3xl mx-auto">
+        <h3 className="text-3xl font-extrabold text-charcoal dark:text-white font-display mb-4">{dict.pages.aboutTeamTitle}</h3>
+        <p className="text-lg text-gray-500 dark:text-gray-400">{dict.pages.aboutTeamDesc}</p>
       </div>
     </div>
   );

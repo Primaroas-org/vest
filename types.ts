@@ -7,6 +7,7 @@ export interface Property {
   type: 'Residential' | 'Commercial' | 'Mixed Use';
   status: PropertyStatus;
   image: string;
+  images?: string[]; // All property images for gallery
   progress: number;
   targetReturn: number;
   minInvest: string;

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Property, ViewState } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -72,6 +72,11 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
   };
 
   const [investmentAmount, setInvestmentAmount] = useState<string>(getInitialAmount());
+  const [activeImage, setActiveImage] = useState(0);
+  const allImages = useMemo(() => {
+    const imgs = property.images && property.images.length > 0 ? property.images : [property.image];
+    return imgs.filter(Boolean);
+  }, [property.images, property.image]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -260,24 +265,62 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
         </button>
       </div>
 
-      {/* Hero Image */}
-      <div className="h-[400px] md:h-[500px] w-full relative">
-        <img src={property.image} alt={property.title} className="w-full h-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
-        <div className="absolute bottom-0 left-0 w-full p-8 md:p-12">
-          <div className="max-w-7xl mx-auto">
-            <span className="bg-primary px-3 py-1 text-white text-xs font-bold uppercase rounded-md mb-4 inline-block tracking-wider">
-              {property.type}
-            </span>
-            <h1 className="text-4xl md:text-5xl font-extrabold text-white font-display mb-2">
-              {property.title}
-            </h1>
-            <div className="flex items-center text-gray-300">
-              <span className="material-icons-round mr-2">location_on</span>
-              {property.location}
+      {/* Hero Image with Gallery */}
+      <div>
+        <div className="h-[400px] md:h-[500px] w-full relative">
+          <img src={allImages[activeImage] || property.image} alt={property.title} className="w-full h-full object-cover transition-all duration-300" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
+          {/* Gallery nav arrows */}
+          {allImages.length > 1 && (
+            <>
+              <button
+                onClick={() => setActiveImage((activeImage - 1 + allImages.length) % allImages.length)}
+                className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white p-2 rounded-full backdrop-blur-sm transition-all z-10"
+              >
+                <span className="material-icons-round">chevron_left</span>
+              </button>
+              <button
+                onClick={() => setActiveImage((activeImage + 1) % allImages.length)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white p-2 rounded-full backdrop-blur-sm transition-all z-10"
+              >
+                <span className="material-icons-round">chevron_right</span>
+              </button>
+              <div className="absolute top-4 right-4 bg-black/50 text-white px-3 py-1 rounded-full text-sm font-bold backdrop-blur-sm z-10">
+                {activeImage + 1} / {allImages.length}
+              </div>
+            </>
+          )}
+          <div className="absolute bottom-0 left-0 w-full p-8 md:p-12">
+            <div className="max-w-7xl mx-auto">
+              <span className="bg-primary px-3 py-1 text-white text-xs font-bold uppercase rounded-md mb-4 inline-block tracking-wider">
+                {property.type}
+              </span>
+              <h1 className="text-4xl md:text-5xl font-extrabold text-white font-display mb-2">
+                {property.title}
+              </h1>
+              <div className="flex items-center text-gray-300">
+                <span className="material-icons-round mr-2">location_on</span>
+                {property.location}
+              </div>
             </div>
           </div>
         </div>
+        {/* Thumbnail strip */}
+        {allImages.length > 1 && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-10 mb-4">
+            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+              {allImages.map((img, i) => (
+                <button
+                  key={i}
+                  onClick={() => setActiveImage(i)}
+                  className={`flex-shrink-0 w-20 h-14 rounded-lg overflow-hidden border-2 transition-all ${i === activeImage ? 'border-primary shadow-lg shadow-primary/20 scale-105' : 'border-white/50 dark:border-gray-700 opacity-70 hover:opacity-100'}`}
+                >
+                  <img src={img} alt={`${property.title} ${i + 1}`} className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-20 relative z-10">
@@ -325,56 +368,25 @@ export const PropertyDetails: React.FC<PropertyDetailsProps> = ({ property, onNa
                   {dict.details.location}
                 </h2>
               </div>
-              <div
-                className="h-64 md:h-96 bg-gray-200 dark:bg-gray-700 flex items-center justify-center relative overflow-hidden group cursor-pointer"
-                onClick={() => openMap(property.latitude, property.longitude, property.location)}
-              >
+              <div className="h-64 md:h-96 bg-gray-200 dark:bg-gray-700 relative overflow-hidden">
                 {property.latitude && property.longitude ? (
-                  <>
-                    {/* Static map preview using OpenStreetMap (free, no API key required) */}
-                    <div className="absolute inset-0 bg-gray-200 dark:bg-gray-700">
-                      <img
-                        src={`https://staticmap.openstreetmap.de/staticmap.php?center=${property.latitude},${property.longitude}&zoom=14&size=800x600&markers=${property.latitude},${property.longitude},red-pushpin`}
-                        alt={property.location}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          // Fallback if image fails to load
-                          const target = e.target as HTMLImageElement;
-                          target.style.display = 'none';
-                        }}
-                      />
-                      {/* Custom marker overlay for better visibility */}
-                      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-                        <div className="w-8 h-8 bg-primary rounded-full border-4 border-white shadow-xl flex items-center justify-center">
-                          <div className="w-3 h-3 bg-white rounded-full"></div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center pointer-events-none">
-                      <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 dark:bg-charcoal/90 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3 pointer-events-auto">
-                        <span className="material-icons-round text-primary">
-                          {isIOS() ? 'map' : 'explore'}
-                        </span>
-                        <span className="font-bold text-charcoal dark:text-white">
-                          {isIOS() ? 'Open in Apple Maps' : 'Open in Google Maps'}
-                        </span>
-                      </div>
-                    </div>
-                  </>
+                  <iframe
+                    title="Property Location"
+                    className="w-full h-full border-0"
+                    src={`https://www.openstreetmap.org/export/embed.html?bbox=${parseFloat(String(property.longitude))-0.01},${parseFloat(String(property.latitude))-0.008},${parseFloat(String(property.longitude))+0.01},${parseFloat(String(property.latitude))+0.008}&layer=mapnik&marker=${property.latitude},${property.longitude}`}
+                    allowFullScreen
+                  />
                 ) : (
-                  <>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="material-icons-round text-6xl text-gray-300 dark:text-gray-600">map</span>
-                    </div>
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center">
-                      <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 dark:bg-charcoal/90 px-6 py-3 rounded-xl shadow-lg flex items-center gap-3">
-                        <span className="material-icons-round text-primary">search</span>
-                        <span className="font-bold text-charcoal dark:text-white">
-                          Search for {property.location}
-                        </span>
-                      </div>
-                    </div>
-                  </>
+                  <div
+                    className="w-full h-full flex flex-col items-center justify-center cursor-pointer group"
+                    onClick={() => openMap(property.latitude, property.longitude, property.location)}
+                  >
+                    <span className="material-icons-round text-6xl text-gray-300 dark:text-gray-600 mb-2">location_on</span>
+                    <p className="text-gray-500 dark:text-gray-400 font-bold text-lg">{property.location}</p>
+                    <p className="text-sm text-primary mt-2 group-hover:underline">
+                      {isIOS() ? 'Open in Apple Maps' : 'Open in Google Maps'}
+                    </p>
+                  </div>
                 )}
               </div>
               <div className="p-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-800">
