@@ -17,11 +17,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Get Supabase connection details
-const supabaseUrl = process.env.SUPABASE_URL || 'https://gozlknklxhwvfksnrmvh.supabase.co';
+const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
 
-if (!supabaseServiceKey) {
-  console.error('❌ Error: SUPABASE_SERVICE_KEY or SUPABASE_ANON_KEY must be set in .env file');
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error('❌ Error: SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_ANON_KEY) must be set in .env file');
   process.exit(1);
 }
 

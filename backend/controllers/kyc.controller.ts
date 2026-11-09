@@ -8,7 +8,10 @@ import type { User, ErrorResponse } from '../types/index.js';
 // Create a service role client for storage operations that bypass RLS
 // This is needed because storage uploads require service role key to bypass RLS
 const getStorageClient = () => {
-    const supabaseUrl = process.env.SUPABASE_URL || 'https://gozlknklxhwvfksnrmvh.supabase.co';
+    const supabaseUrl = process.env.SUPABASE_URL;
+    if (!supabaseUrl) {
+        throw new Error('SUPABASE_URL is not set (see .env.example)');
+    }
     
     // Service role key is a JWT token starting with 'eyJ' - this bypasses RLS
     // The 'sb_' keys are publishable/anon keys and will respect RLS
@@ -21,7 +24,6 @@ const getStorageClient = () => {
             : serviceRoleKey.startsWith('sb_') ? 'Publishable (Anon - respects RLS)' 
             : 'Unknown format';
         console.log('[KYC Storage] Service role key format:', keyType);
-        console.log('[KYC Storage] Key preview:', serviceRoleKey.substring(0, 20) + '...');
     }
     
     // Only use JWT format (eyJ...) as service role key - this bypasses RLS

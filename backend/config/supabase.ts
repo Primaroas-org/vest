@@ -9,15 +9,21 @@ import { resolve } from 'path';
 // Load .env from project root
 dotenv.config({ path: resolve(process.cwd(), '.env') });
 
-// Create Supabase client with service role key for backend operations
-// This bypasses RLS policies for administrative operations
-// Use environment variables if available, otherwise fall back to defaults
-const supabaseUrl = process.env.SUPABASE_URL || 'https://gozlknklxhwvfksnrmvh.supabase.co';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || 'sb_publishable_zOirVz6-02N3CtgyqVAYpQ_s0QuE3ND';
+// Supabase client for backend operations. Configuration comes only from the environment:
+// a service-role key bypasses row-level security, a publishable key respects it.
+const supabaseUrl = process.env.SUPABASE_URL ?? '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-console.log('[Supabase Config] URL:', supabaseUrl ? supabaseUrl.substring(0, 30) + '...' : 'NOT SET');
-console.log('[Supabase Config] Service Key:', supabaseServiceKey ? supabaseServiceKey.substring(0, 20) + '...' : 'NOT SET');
-console.log('[Supabase Config] Service Key type:', supabaseServiceKey?.startsWith('eyJ') ? 'JWT (Legacy Service Role)' : supabaseServiceKey?.startsWith('sb_') ? 'Publishable Key (New Format)' : 'Unknown');
+if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY) in .env (see .env.example)');
+}
+
+// Log which kind of key is in use, never any part of the key itself
+const keyType = supabaseServiceKey.startsWith('sb_publishable_') ? 'publishable key (respects RLS)'
+    : supabaseServiceKey.startsWith('sb_secret_') ? 'secret key'
+    : supabaseServiceKey.startsWith('eyJ') ? 'legacy JWT key'
+    : 'unrecognised key format';
+console.log(`[Supabase Config] Using a ${keyType}`);
 
 export const supabase: SupabaseClient = createClient(
     supabaseUrl,
