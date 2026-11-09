@@ -1,9 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation, Routes, Route } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { ViewState } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { SkeletonCard, SkeletonTable, SkeletonGraph, SkeletonList, SkeletonGrid, SkeletonText } from './Skeletons';
+import { cachedFetch, getCached, invalidateDashboardCache } from '../utils/apiCache';
+import DepositPage from './Wallet/DepositPage';
+import DepositConfirmation from './Wallet/DepositConfirmation';
+import WithdrawPage from './Wallet/WithdrawPage';
+import WithdrawConfirmation from './Wallet/WithdrawConfirmation';
 
 interface DashboardProps {
     onNavigate: (view: ViewState) => void;
@@ -186,18 +191,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         }
     }, [user?.kycStatus]);
 
+    // Use ref to track if initial notification fetch happened, avoid re-fetching on user object changes
+    const notificationsFetchedRef = useRef(false);
+    
     useEffect(() => {
+        const token = localStorage.getItem('supabase.auth.token');
+        
         const fetchUnreadCount = async () => {
-            if (!user) return;
+            if (!user || !token) return;
 
             try {
-                // Get fresh token from Supabase session
-                const { supabase } = await import('../utils/supabase');
-                const { data: { session } } = await supabase.auth.getSession();
-                const token = session?.access_token || localStorage.getItem('supabase.auth.token');
-
-                if (!token) return;
-
                 const response = await fetch('/api/notifications?unread_only=true', {
                     headers: {
                         'Authorization': `Bearer ${token}`,
@@ -208,12 +211,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 if (response.ok) {
                     const data = await response.json();
                     setUnreadCount(data.data?.length || 0);
-                } else if (response.status === 401) {
-                    // Token expired, try to refresh
-                    const { data: { session: newSession } } = await supabase.auth.refreshSession();
-                    if (newSession?.access_token) {
-                        localStorage.setItem('supabase.auth.token', newSession.access_token);
-                    }
                 }
             } catch (error) {
                 console.error('Error fetching unread count:', error);
@@ -221,16 +218,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         };
 
         const fetchAllNotifications = async () => {
-            if (!user || !showNotifications) return;
+            if (!user || !showNotifications || !token) return;
 
             try {
-                // Get fresh token from Supabase session
-                const { supabase } = await import('../utils/supabase');
-                const { data: { session } } = await supabase.auth.getSession();
-                const token = session?.access_token || localStorage.getItem('supabase.auth.token');
-
-                if (!token) return;
-
                 const response = await fetch('/api/notifications', {
                     headers: {
                         'Authorization': `Bearer ${token}`,
@@ -241,26 +231,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 if (response.ok) {
                     const data = await response.json();
                     setNotifications(data.data || []);
-                } else if (response.status === 401) {
-                    // Token expired, try to refresh
-                    const { data: { session: newSession } } = await supabase.auth.refreshSession();
-                    if (newSession?.access_token) {
-                        localStorage.setItem('supabase.auth.token', newSession.access_token);
-                    }
                 }
             } catch (error) {
                 console.error('Error fetching notifications:', error);
             }
         };
 
-        fetchUnreadCount();
+        if (user && !notificationsFetchedRef.current) {
+            fetchUnreadCount();
+            notificationsFetchedRef.current = true;
+        }
         if (showNotifications) {
             fetchAllNotifications();
         }
         // Refresh unread count every 30 seconds
         const interval = setInterval(fetchUnreadCount, 30000);
         return () => clearInterval(interval);
-    }, [user, showNotifications]);
+    }, [user?.id, showNotifications]);
 
     // Get active tab from current path
     const getActiveTab = (): DashboardTab => {
@@ -527,6 +514,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                     <Route path="/holdings" element={<HoldingsView />} />
                     <Route path="/performance" element={<PerformanceView />} />
                     <Route path="/wallet" element={<WalletView />} />
+                    <Route path="/wallet/deposit" element={<DepositPage />} />
+                    <Route path="/wallet/deposit/confirm" element={<DepositConfirmation />} />
+                    <Route path="/wallet/withdraw" element={<WithdrawPage />} />
+                    <Route path="/wallet/withdraw/confirm" element={<WithdrawConfirmation />} />
                     <Route path="/transactions" element={<TransactionsView />} />
                     <Route path="/settings" element={<SettingsView />} />
                 </Routes>
@@ -539,29 +530,31 @@ const OverviewView: React.FC<{ onNavigate: (view: ViewState) => void }> = ({ onN
     const { dict } = useLanguage();
     const { user } = useAuth();
     const navigate = useNavigate();
-    const [stats, setStats] = useState<any>(null);
-    const [graphData, setGraphData] = useState<any[]>([]);
+    
+    // Initialize from cache to avoid loading flash on revisit
+    const [stats, setStats] = useState<any>(() => getCached('dashboard:stats'));
+    const [graphData, setGraphData] = useState<any[]>(() => getCached('dashboard:graph:yearly') || []);
     const [graphPeriod, setGraphPeriod] = useState<'yearly' | 'monthly' | 'weekly'>('yearly');
-    const [assetBreakdown, setAssetBreakdown] = useState<any>(null);
-    const [assetBreakdownLoading, setAssetBreakdownLoading] = useState(true);
-    const [loading, setLoading] = useState(true);
+    const [assetBreakdown, setAssetBreakdown] = useState<any>(() => getCached('dashboard:asset-breakdown'));
+    const [assetBreakdownLoading, setAssetBreakdownLoading] = useState(!getCached('dashboard:asset-breakdown'));
+    const [loading, setLoading] = useState(!getCached('dashboard:stats'));
 
     useEffect(() => {
         const fetchStats = async () => {
             if (!user) return;
 
             try {
-                const response = await fetch('/api/dashboard/stats', {
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
-                        'Content-Type': 'application/json'
-                    }
+                const data = await cachedFetch('dashboard:stats', async () => {
+                    const response = await fetch('/api/dashboard/stats', {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) throw new Error('Failed to fetch stats');
+                    return response.json();
                 });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setStats(data);
-                }
+                setStats(data);
             } catch (error) {
                 console.error('Error fetching dashboard stats:', error);
             } finally {
@@ -577,17 +570,17 @@ const OverviewView: React.FC<{ onNavigate: (view: ViewState) => void }> = ({ onN
             if (!user) return;
 
             try {
-                const response = await fetch(`/api/dashboard/performance/graph?period=${graphPeriod}`, {
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
-                        'Content-Type': 'application/json'
-                    }
+                const data = await cachedFetch(`dashboard:graph:${graphPeriod}`, async () => {
+                    const response = await fetch(`/api/dashboard/performance/graph?period=${graphPeriod}`, {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) throw new Error('Failed to fetch graph');
+                    return response.json();
                 });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setGraphData(data.dataPoints || []);
-                }
+                setGraphData(data.dataPoints || []);
             } catch (error) {
                 console.error('Error fetching graph data:', error);
             }
@@ -604,21 +597,22 @@ const OverviewView: React.FC<{ onNavigate: (view: ViewState) => void }> = ({ onN
             }
 
             try {
-                setAssetBreakdownLoading(true);
-                const response = await fetch('/api/dashboard/asset-breakdown', {
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setAssetBreakdown(data);
-                } else {
-                    // If error, set empty breakdown
-                    setAssetBreakdown({ assetTypes: [], totalInvested: 0, growthPercentage: 0 });
+                if (!getCached('dashboard:asset-breakdown')) {
+                    setAssetBreakdownLoading(true);
                 }
+                const data = await cachedFetch('dashboard:asset-breakdown', async () => {
+                    const response = await fetch('/api/dashboard/asset-breakdown', {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) {
+                        return { assetTypes: [], totalInvested: 0, growthPercentage: 0 };
+                    }
+                    return response.json();
+                });
+                setAssetBreakdown(data);
             } catch (error) {
                 console.error('Error fetching asset breakdown:', error);
                 setAssetBreakdown({ assetTypes: [], totalInvested: 0, growthPercentage: 0 });
@@ -985,15 +979,14 @@ const OverviewView: React.FC<{ onNavigate: (view: ViewState) => void }> = ({ onN
 const WalletView: React.FC = () => {
     const { dict } = useLanguage();
     const { user } = useAuth();
+    const navigate = useNavigate();
     const [balance, setBalance] = useState<number>(user?.balance || 0);
     const [loading, setLoading] = useState(false);
-    const [showDepositModal, setShowDepositModal] = useState(false);
-    const [showWithdrawModal, setShowWithdrawModal] = useState(false);
     const [showAddCardModal, setShowAddCardModal] = useState(false);
-    const [amount, setAmount] = useState('');
     const [error, setError] = useState('');
-    const [cards, setCards] = useState<any[]>([]);
-    const [cardsLoading, setCardsLoading] = useState(true);
+    // The cache holds the whole API response ({ success, data }), so read .data
+    const [cards, setCards] = useState<any[]>(() => getCached<{ data?: any[] }>('dashboard:cards')?.data || []);
+    const [cardsLoading, setCardsLoading] = useState(!getCached('dashboard:cards'));
     const [cardForm, setCardForm] = useState({
         bank_name: '',
         last_four_digits: '',
@@ -1016,17 +1009,17 @@ const WalletView: React.FC = () => {
 
             try {
                 const token = localStorage.getItem('supabase.auth.token');
-                const response = await fetch('/api/cards', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    }
+                const data = await cachedFetch('dashboard:cards', async () => {
+                    const response = await fetch('/api/cards', {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) throw new Error('Failed to fetch cards');
+                    return response.json();
                 });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setCards(data.data || []);
-                }
+                setCards(data.data || []);
             } catch (error) {
                 console.error('Error fetching cards:', error);
             } finally {
@@ -1036,123 +1029,6 @@ const WalletView: React.FC = () => {
 
         fetchCards();
     }, [user]);
-
-    const handleDeposit = async () => {
-        const depositAmount = parseFloat(amount);
-        if (!depositAmount || depositAmount <= 0) {
-            setError('Please enter a valid amount');
-            return;
-        }
-
-        setLoading(true);
-        setError('');
-
-        try {
-            const token = localStorage.getItem('supabase.auth.token');
-            const response = await fetch('/api/wallet/deposit', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ amount: depositAmount })
-            });
-
-            const data = await response.json();
-
-            if (response.ok && data.success) {
-                const newBalance = parseFloat(data.data.new_balance);
-                setBalance(newBalance);
-                setAmount('');
-                setShowDepositModal(false);
-                // Refresh user data in AuthContext
-                if (user) {
-                    user.balance = newBalance;
-                    // Trigger a refresh by fetching user profile
-                    const { supabase } = await import('../utils/supabase');
-                    const { data: { session } } = await supabase.auth.getSession();
-                    if (session?.user) {
-                        const { data: profile } = await supabase
-                            .from('users')
-                            .select('wallet_balance')
-                            .eq('id', session.user.id)
-                            .single();
-                        if (profile) {
-                            user.balance = parseFloat(profile.wallet_balance || '0');
-                        }
-                    }
-                }
-            } else {
-                setError(data.error || 'Failed to deposit funds');
-            }
-        } catch (err) {
-            setError('An error occurred. Please try again.');
-            console.error('Deposit error:', err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleWithdraw = async () => {
-        const withdrawAmount = parseFloat(amount);
-        if (!withdrawAmount || withdrawAmount <= 0) {
-            setError('Please enter a valid amount');
-            return;
-        }
-
-        if (withdrawAmount > balance) {
-            setError('Insufficient balance');
-            return;
-        }
-
-        setLoading(true);
-        setError('');
-
-        try {
-            const token = localStorage.getItem('supabase.auth.token');
-            const response = await fetch('/api/wallet/withdraw', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ amount: withdrawAmount })
-            });
-
-            const data = await response.json();
-
-            if (response.ok && data.success) {
-                const newBalance = parseFloat(data.data.new_balance);
-                setBalance(newBalance);
-                setAmount('');
-                setShowWithdrawModal(false);
-                // Refresh user data in AuthContext
-                if (user) {
-                    user.balance = newBalance;
-                    // Trigger a refresh by fetching user profile
-                    const { supabase } = await import('../utils/supabase');
-                    const { data: { session } } = await supabase.auth.getSession();
-                    if (session?.user) {
-                        const { data: profile } = await supabase
-                            .from('users')
-                            .select('wallet_balance')
-                            .eq('id', session.user.id)
-                            .single();
-                        if (profile) {
-                            user.balance = parseFloat(profile.wallet_balance || '0');
-                        }
-                    }
-                }
-            } else {
-                setError(data.error || 'Failed to withdraw funds');
-            }
-        } catch (err) {
-            setError('An error occurred. Please try again.');
-            console.error('Withdraw error:', err);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     return (
         <div className="space-y-8">
@@ -1178,13 +1054,13 @@ const WalletView: React.FC = () => {
 
                         <div className="mt-8 flex gap-4">
                             <button
-                                onClick={() => setShowDepositModal(true)}
+                                onClick={() => navigate('/dashboard/wallet/deposit')}
                                 className="flex-1 bg-emerald-green hover:bg-emerald-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-emerald-green/20 transition-all active:scale-95"
                             >
                                 {dict.dashboard.wallet.deposit}
                             </button>
                             <button
-                                onClick={() => setShowWithdrawModal(true)}
+                                onClick={() => navigate('/dashboard/wallet/withdraw')}
                                 className="flex-1 bg-white/10 hover:bg-white/20 text-white py-3 rounded-xl font-bold backdrop-blur-sm transition-all active:scale-95"
                             >
                                 {dict.dashboard.wallet.withdraw}
@@ -1269,98 +1145,6 @@ const WalletView: React.FC = () => {
                     )}
                 </div>
             </div>
-
-            {/* Deposit Modal */}
-            {showDepositModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowDepositModal(false)}>
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">{dict.dashboard.wallet.deposit}</h3>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Amount (₮)</label>
-                                <input
-                                    type="number"
-                                    value={amount}
-                                    onChange={(e) => setAmount(e.target.value)}
-                                    className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-emerald-400 text-gray-900 dark:text-white"
-                                    placeholder="Enter amount"
-                                    min="0"
-                                    step="0.01"
-                                />
-                            </div>
-                            {error && (
-                                <p className="text-red-500 text-sm">{error}</p>
-                            )}
-                            <div className="flex gap-4">
-                                <button
-                                    onClick={() => {
-                                        setShowDepositModal(false);
-                                        setAmount('');
-                                        setError('');
-                                    }}
-                                    className="flex-1 px-4 py-3 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={handleDeposit}
-                                    disabled={loading}
-                                    className="flex-1 px-4 py-3 rounded-xl bg-emerald-500 dark:bg-emerald-600 text-white font-bold hover:bg-emerald-600 dark:hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                                >
-                                    {loading ? 'Processing...' : dict.dashboard.wallet.deposit}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Withdraw Modal */}
-            {showWithdrawModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowWithdrawModal(false)}>
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">{dict.dashboard.wallet.withdraw}</h3>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Amount (₮)</label>
-                                <input
-                                    type="number"
-                                    value={amount}
-                                    onChange={(e) => setAmount(e.target.value)}
-                                    className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-emerald-400 text-gray-900 dark:text-white"
-                                    placeholder="Enter amount"
-                                    min="0"
-                                    max={balance}
-                                    step="0.01"
-                                />
-                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Available: ₮ {balance.toLocaleString()}</p>
-                            </div>
-                            {error && (
-                                <p className="text-red-500 text-sm">{error}</p>
-                            )}
-                            <div className="flex gap-4">
-                                <button
-                                    onClick={() => {
-                                        setShowWithdrawModal(false);
-                                        setAmount('');
-                                        setError('');
-                                    }}
-                                    className="flex-1 px-4 py-3 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={handleWithdraw}
-                                    disabled={loading}
-                                    className="flex-1 px-4 py-3 rounded-xl bg-emerald-500 dark:bg-emerald-600 text-white font-bold hover:bg-emerald-600 dark:hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                                >
-                                    {loading ? 'Processing...' : dict.dashboard.wallet.withdraw}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* Add Card Modal */}
             {showAddCardModal && (
@@ -1503,8 +1287,8 @@ const WalletView: React.FC = () => {
 const TransactionsView: React.FC = () => {
     const { dict } = useLanguage();
     const { user } = useAuth();
-    const [transactions, setTransactions] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [transactions, setTransactions] = useState<any[]>(() => getCached('dashboard:transactions') || []);
+    const [loading, setLoading] = useState(!getCached('dashboard:transactions'));
 
     useEffect(() => {
         const fetchTransactions = async () => {
@@ -1512,17 +1296,17 @@ const TransactionsView: React.FC = () => {
 
             try {
                 const token = localStorage.getItem('supabase.auth.token');
-                const response = await fetch('/api/user/transactions?limit=100', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    }
+                const data = await cachedFetch('dashboard:transactions', async () => {
+                    const response = await fetch('/api/user/transactions?limit=100', {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) throw new Error('Failed to fetch transactions');
+                    return response.json();
                 });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setTransactions(data.data || []);
-                }
+                setTransactions(data.data || []);
             } catch (error) {
                 console.error('Error fetching transactions:', error);
             } finally {
@@ -1631,25 +1415,25 @@ const TransactionsView: React.FC = () => {
 const AssetsView: React.FC = () => {
     const { dict } = useLanguage();
     const { user } = useAuth();
-    const [assets, setAssets] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [assets, setAssets] = useState<any[]>(() => getCached('dashboard:assets') || []);
+    const [loading, setLoading] = useState(!getCached('dashboard:assets'));
 
     useEffect(() => {
         const fetchAssets = async () => {
             if (!user) return;
 
             try {
-                const response = await fetch('/api/dashboard/assets', {
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
-                        'Content-Type': 'application/json'
-                    }
+                const data = await cachedFetch('dashboard:assets', async () => {
+                    const response = await fetch('/api/dashboard/assets', {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token')}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) throw new Error('Failed to fetch assets');
+                    return response.json();
                 });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setAssets(data.assets || []);
-                }
+                setAssets(data.assets || []);
             } catch (error) {
                 console.error('Error fetching assets:', error);
             } finally {

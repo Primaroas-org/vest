@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Edit, Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { cachedFetch, getCached, invalidateCache } from '../../utils/apiCache';
 
 interface Property {
   id: string;
@@ -19,25 +20,25 @@ interface Property {
 }
 
 const AdminProperties: React.FC = () => {
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [properties, setProperties] = useState<Property[]>(() => getCached('admin:properties') || []);
+  const [loading, setLoading] = useState(!getCached('admin:properties'));
   const navigate = useNavigate();
 
-  const fetchProperties = async () => {
+  const fetchProperties = async (forceRefresh = false) => {
     try {
-      setLoading(true);
+      if (!getCached('admin:properties') || forceRefresh) setLoading(true);
       const token = localStorage.getItem('access_token') || localStorage.getItem('supabase.auth.token');
-      const response = await fetch('/api/admin/properties', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.data) {
-          setProperties(data.data);
-        }
+      const data = await cachedFetch('admin:properties', async () => {
+        const response = await fetch('/api/admin/properties', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        if (!response.ok) throw new Error('Failed to fetch properties');
+        return response.json();
+      }, { forceRefresh });
+      if (data.success && data.data) {
+        setProperties(data.data);
       }
     } catch (error) {
       console.error('Error fetching properties:', error);

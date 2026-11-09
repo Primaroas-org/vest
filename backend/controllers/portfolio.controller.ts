@@ -54,6 +54,8 @@ export async function getPortfolio(req: any, res: any): Promise<void> {
 
         const portfolioInvestments: PortfolioInvestment[] = userInvestments.map((inv) => {
             const property = inv.property;
+            // total_dividends_received is nullable in schema.sql; treat a missing value as zero
+            const dividendsReceived = inv.totalDividendsReceived ?? '0.00';
 
             // Current value = shares_owned * current_price_per_share
             const currentValue = MNT.multiply(property.pricePerShare, inv.sharesOwned.toString());
@@ -67,7 +69,7 @@ export async function getPortfolio(req: any, res: any): Promise<void> {
             // Total return = current_value + dividends - invested
             const totalReturn = MNT.add(
                 MNT.subtract(currentValue, inv.totalInvested),
-                inv.totalDividendsReceived
+                dividendsReceived
             );
 
             // Return percentage = (total_return / total_invested) * 100
@@ -76,7 +78,7 @@ export async function getPortfolio(req: any, res: any): Promise<void> {
             // Accumulate totals
             totalInvested = MNT.add(totalInvested, inv.totalInvested);
             totalCurrentValue = MNT.add(totalCurrentValue, currentValue);
-            totalDividendsReceived = MNT.add(totalDividendsReceived, inv.totalDividendsReceived);
+            totalDividendsReceived = MNT.add(totalDividendsReceived, dividendsReceived);
 
             return {
                 property_id: property.id,
@@ -89,7 +91,7 @@ export async function getPortfolio(req: any, res: any): Promise<void> {
                 current_price_per_share: property.pricePerShare,
                 total_invested: inv.totalInvested,
                 current_value: currentValue,
-                total_dividends_received: inv.totalDividendsReceived,
+                total_dividends_received: dividendsReceived,
                 total_return: totalReturn,
                 total_return_percentage: returnPercentage,
                 expected_annual_yield: property.expectedAnnualYield || undefined,

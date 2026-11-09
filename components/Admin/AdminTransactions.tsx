@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Search, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { cachedFetch, getCached } from '../../utils/apiCache';
 
 interface Transaction {
   id: string;
@@ -12,61 +13,55 @@ interface Transaction {
   status: string;
 }
 
+const mapTransactions = (rawData: any[]): Transaction[] => {
+  return rawData.map((tx: any) => {
+    const createdAt = tx.createdAt || tx.created_at;
+    const formatDate = (dateValue: string | Date | null | undefined): string => {
+      if (!dateValue) return 'N/A';
+      try {
+        const date = new Date(dateValue);
+        if (isNaN(date.getTime())) return 'N/A';
+        return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      } catch { return 'N/A'; }
+    };
+    return {
+      id: tx.id,
+      transaction_id: `#TRX-${tx.id.slice(-4).toUpperCase()}`,
+      asset: tx.property?.name || tx.description || 'N/A',
+      user: tx.user?.full_name || tx.user?.fullName || tx.user?.email || 'Unknown',
+      amount: `₮${parseFloat(tx.amount || '0').toLocaleString()}`,
+      type: tx.transaction_type === 'withdrawal' ? 'Withdrawal' : tx.transaction_type === 'investment' ? 'Investment' : tx.transaction_type === 'dividend' ? 'Dividend' : 'Deposit',
+      date: formatDate(createdAt),
+      status: tx.status === 'completed' ? 'Completed' : tx.status === 'pending' ? 'Processing' : 'Failed'
+    };
+  });
+};
+
 const AdminTransactions: React.FC = () => {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    const cached = getCached<any>('admin:transactions');
+    return cached?.success && cached?.data ? mapTransactions(cached.data) : [];
+  });
+  const [loading, setLoading] = useState(!getCached('admin:transactions'));
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
 
   useEffect(() => {
     const fetchTransactions = async () => {
       try {
-        setLoading(true);
+        if (!getCached('admin:transactions')) setLoading(true);
         const token = localStorage.getItem('access_token') || localStorage.getItem('supabase.auth.token');
-        const response = await fetch('/api/admin/transactions?limit=100', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+        const data = await cachedFetch('admin:transactions', async () => {
+          const response = await fetch('/api/admin/transactions?limit=100', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          if (!response.ok) throw new Error('Failed to fetch transactions');
+          return response.json();
         });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.data) {
-            const mappedTransactions: Transaction[] = data.data.map((tx: any) => {
-              // Handle both camelCase (Drizzle) and snake_case (legacy) field names
-              const createdAt = tx.createdAt || tx.created_at;
-              
-              // Format date safely
-              const formatDate = (dateValue: string | Date | null | undefined): string => {
-                if (!dateValue) return 'N/A';
-                try {
-                  const date = new Date(dateValue);
-                  if (isNaN(date.getTime())) return 'N/A';
-                  return date.toLocaleString('en-US', { 
-                    month: 'short', 
-                    day: 'numeric', 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                  });
-                } catch (error) {
-                  console.error('Error formatting date:', dateValue, error);
-                  return 'N/A';
-                }
-              };
-
-              return {
-                id: tx.id,
-                transaction_id: `#TRX-${tx.id.slice(-4).toUpperCase()}`,
-                asset: tx.property?.name || tx.description || 'N/A',
-                user: tx.user?.full_name || tx.user?.fullName || tx.user?.email || 'Unknown',
-                amount: `₮${parseFloat(tx.amount || '0').toLocaleString()}`,
-                type: tx.transaction_type === 'withdrawal' ? 'Withdrawal' : tx.transaction_type === 'investment' ? 'Investment' : tx.transaction_type === 'dividend' ? 'Dividend' : 'Deposit',
-                date: formatDate(createdAt),
-                status: tx.status === 'completed' ? 'Completed' : tx.status === 'pending' ? 'Processing' : 'Failed'
-              };
-            });
-            setTransactions(mappedTransactions);
-          }
+        if (data.success && data.data) {
+          setTransactions(mapTransactions(data.data));
         }
       } catch (error) {
         console.error('Error fetching transactions:', error);

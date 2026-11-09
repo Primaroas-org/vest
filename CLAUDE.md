@@ -37,7 +37,7 @@ pnpm db:copy-auth-sync # Copy auth sync trigger to clipboard
 pnpm db:copy-seed     # Copy seed data to clipboard (optional)
 ```
 
-After copying, paste and run in Supabase Dashboard > SQL Editor. See README.DATABASE.md for detailed setup instructions.
+After copying, paste and run in Supabase Dashboard > SQL Editor. See docs/DATABASE.md for detailed setup instructions.
 
 ## Architecture
 

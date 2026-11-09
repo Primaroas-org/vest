@@ -1,7 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = 'https://gozlknklxhwvfksnrmvh.supabase.co';
-const supabaseAnonKey = 'sb_publishable_zOirVz6-02N3CtgyqVAYpQ_s0QuE3ND';
+// Public values only. The publishable (anon) key is meant to ship to the browser;
+// Postgres row-level security decides what each signed-in user can read or write.
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env (see .env.example)');
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {

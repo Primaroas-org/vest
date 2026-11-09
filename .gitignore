@@ -17,7 +17,6 @@ dist-ssr
 .env.local
 .env.production
 .env.development
-.env.example
 
 # Editor directories and files
 .vscode/*
@@ -41,5 +40,6 @@ dist/
 *.db
 *.sqlite
 
-# supabase
-supabase
+# supabase (only the sample seed data is committed)
+supabase/*
+!supabase/seed.sql

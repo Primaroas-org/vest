@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, ViewState } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, SESSION_TIMEOUT_MS } from '../contexts/AuthContext';
 
 interface NavbarProps {
   onNavigate: (view: ViewState) => void;
@@ -10,7 +10,27 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView }) => {
   const { dict, language, setLanguage } = useLanguage();
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout, resetSessionTimeout, getLastActivityTime } = useAuth();
+  
+  // Local countdown state - only re-renders the Navbar, not the entire app
+  const [sessionTimeout, setSessionTimeout] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      setSessionTimeout(null);
+      return;
+    }
+
+    const updateCountdown = () => {
+      const elapsed = Date.now() - getLastActivityTime();
+      const remaining = Math.max(0, SESSION_TIMEOUT_MS - elapsed);
+      setSessionTimeout(Math.ceil(remaining / 1000));
+    };
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+    return () => clearInterval(interval);
+  }, [user, getLastActivityTime]);
 
   const navLinks: NavLink[] = [
     { label: dict.nav.marketplace, id: 'marketplace', isActive: currentView === 'marketplace' || currentView === 'property-details' },
@@ -39,11 +59,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView }) => {
               <button
                 key={link.id}
                 onClick={() => onNavigate(link.id as ViewState)}
-                className={`transition-colors ${
-                  link.isActive
+                className={`transition-colors ${link.isActive
                     ? 'text-primary'
                     : 'text-gray-600 dark:text-gray-300 hover:text-primary'
-                }`}
+                  }`}
               >
                 {link.label}
               </button>
@@ -52,8 +71,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView }) => {
 
           {/* User Actions */}
           <div className="flex items-center gap-4">
-             {/* Language Switcher */}
-             <button 
+            {/* Language Switcher */}
+            <button
               onClick={() => setLanguage(language === 'mn' ? 'en' : 'mn')}
               className="px-2 py-1 text-xs font-bold border border-gray-300 dark:border-gray-600 rounded uppercase text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
             >
@@ -62,6 +81,23 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView }) => {
 
             {isAuthenticated && user ? (
               <>
+                {/* Session Timeout Indicator */}
+                {sessionTimeout !== null && (
+                  <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                    <span className="material-icons-round text-sm text-gray-500 dark:text-gray-400">
+                      timer
+                    </span>
+                    <span className={`text-xs font-semibold ${
+                      sessionTimeout <= 60 
+                        ? 'text-red-500 dark:text-red-400' 
+                        : sessionTimeout <= 120 
+                        ? 'text-orange-500 dark:text-orange-400'
+                        : 'text-gray-600 dark:text-gray-400'
+                    }`}>
+                      {Math.floor(sessionTimeout / 60)}:{(sessionTimeout % 60).toString().padStart(2, '0')}
+                    </span>
+                  </div>
+                )}
                 <div className="hidden lg:flex flex-col items-end mr-4">
                   <span className="text-[10px] uppercase tracking-widest text-gray-400 font-bold">
                     {dict.nav.walletLabel}
@@ -75,8 +111,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView }) => {
                     notifications
                   </span>
                 </button>
-                <button 
-                  onClick={() => onNavigate('dashboard')}
+                <button
+                  onClick={() => {
+                    resetSessionTimeout();
+                    onNavigate('dashboard');
+                  }}
                   className="bg-charcoal dark:bg-white dark:text-charcoal text-white px-5 py-2.5 rounded-full font-semibold text-sm transition-transform hover:scale-105 active:scale-95"
                 >
                   {dict.nav.portfolio}
@@ -84,13 +123,13 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView }) => {
               </>
             ) : (
               <>
-                <button 
-                   onClick={() => onNavigate('login')}
-                   className="hidden sm:block text-gray-600 dark:text-gray-300 hover:text-primary font-bold transition-colors"
+                <button
+                  onClick={() => onNavigate('login')}
+                  className="hidden sm:block text-gray-600 dark:text-gray-300 hover:text-primary font-bold transition-colors"
                 >
                   {dict.nav.login}
                 </button>
-                <button 
+                <button
                   onClick={() => onNavigate('signup')}
                   className="bg-primary text-white px-5 py-2.5 rounded-full font-semibold text-sm transition-transform hover:scale-105 active:scale-95 shadow-lg shadow-primary/20"
                 >

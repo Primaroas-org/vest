@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { CloudUpload, Sparkles, Eye, Trash2, Plus, FileText, Download, Save, X } from 'lucide-react';
-import { PropertyData, AssetType } from './types';
+import { CloudUpload, Sparkles, Eye, Trash2, Plus, FileText, Download, Save, X, Link, Loader2 } from 'lucide-react';
+import { PropertyData, AssetType, PropertyImage } from './types';
 
 interface PropertyFormProps {
   propertyId?: string;
@@ -19,6 +19,13 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ propertyId }) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [importUrl, setImportUrl] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState(false);
+  const [showHtmlPaste, setShowHtmlPaste] = useState(false);
+  const [pastedHtml, setPastedHtml] = useState('');
+
   const [data, setData] = useState<PropertyData>({
     name: '',
     location: '',
@@ -30,6 +37,84 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ propertyId }) => {
     images: [],
     documents: []
   });
+
+  const applyImportedData = (d: any) => {
+    setData(prev => ({
+      ...prev,
+      name: d.title || prev.name,
+      location: d.location || prev.location,
+      description: d.description || prev.description,
+      totalValue: d.price ? String(d.price) : prev.totalValue,
+      images: d.images && d.images.length > 0 ? d.images.map((url: string, i: number) => ({
+        id: `imported-${i}`,
+        url,
+        isMain: i === 0
+      })) : prev.images,
+    }));
+    setImportSuccess(true);
+    setTimeout(() => setImportSuccess(false), 3000);
+  };
+
+  const handleImportFromUrl = async () => {
+    if (!importUrl.trim()) return;
+    setIsImporting(true);
+    setImportError(null);
+    setImportSuccess(false);
+    try {
+      const token = localStorage.getItem('access_token') || localStorage.getItem('supabase.auth.token');
+      const response = await fetch('/api/admin/scrape-listing', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ url: importUrl.trim() })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        // If blocked by Cloudflare, offer HTML paste option
+        if (result.error?.includes('Cloudflare') || result.error?.includes('automated access') || response.status === 400) {
+          setShowHtmlPaste(true);
+          setImportError('Unegui.mn is blocking automated access. Open the listing in your browser, right-click > "View Page Source", copy all, and paste below.');
+        } else {
+          throw new Error(result.error || 'Failed to import listing');
+        }
+        return;
+      }
+      applyImportedData(result.data);
+    } catch (err: any) {
+      setImportError(err.message || 'Import failed');
+      setShowHtmlPaste(true);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleParseHtml = async () => {
+    if (!pastedHtml.trim()) return;
+    setIsImporting(true);
+    setImportError(null);
+    try {
+      const token = localStorage.getItem('access_token') || localStorage.getItem('supabase.auth.token');
+      const response = await fetch('/api/admin/parse-listing-html', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ html: pastedHtml.trim(), source_url: importUrl.trim() })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Failed to parse HTML');
+      applyImportedData(result.data);
+      setShowHtmlPaste(false);
+      setPastedHtml('');
+    } catch (err: any) {
+      setImportError(err.message || 'Failed to parse HTML');
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
   useEffect(() => {
     if (isEditing && id) {
@@ -253,6 +338,80 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ propertyId }) => {
       )}
 
       <div className="flex-1 max-w-[800px]">
+        {/* Import from URL */}
+        {!isEditing && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Link className="size-5 text-primary" />
+              <h2 className="text-charcoal dark:text-white text-lg font-bold">Import from URL</h2>
+              <span className="text-xs bg-primary/10 text-primary font-bold px-2 py-0.5 rounded-full">unegui.mn</span>
+            </div>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              Import property details from unegui.mn listings.
+            </p>
+            <div className="flex gap-3">
+              <input
+                type="url"
+                value={importUrl}
+                onChange={(e) => setImportUrl(e.target.value)}
+                placeholder="https://www.unegui.mn/adv/..."
+                className="flex-1 h-12 rounded-xl border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-primary text-charcoal dark:text-white px-4 bg-gray-50 dark:bg-gray-900 text-sm"
+              />
+              <button
+                onClick={handleImportFromUrl}
+                disabled={isImporting || !importUrl.trim()}
+                className="px-6 h-12 bg-primary text-white font-bold rounded-xl hover:bg-emerald-600 disabled:opacity-50 transition-all flex items-center gap-2"
+              >
+                {isImporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+                {isImporting ? 'Importing...' : 'Try Import'}
+              </button>
+            </div>
+
+            {/* HTML Paste fallback */}
+            {showHtmlPaste && (
+              <div className="mt-4 p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-xl">
+                <p className="text-sm text-amber-700 dark:text-amber-400 mb-3 font-bold">Manual Import</p>
+                <ol className="text-xs text-amber-600 dark:text-amber-400 mb-3 space-y-1 list-decimal list-inside">
+                  <li>Open the unegui.mn listing in your browser</li>
+                  <li>Right-click anywhere on the page and select "View Page Source"</li>
+                  <li>Select All (Ctrl+A / Cmd+A), Copy (Ctrl+C / Cmd+C)</li>
+                  <li>Paste the HTML source below</li>
+                </ol>
+                <textarea
+                  value={pastedHtml}
+                  onChange={(e) => setPastedHtml(e.target.value)}
+                  placeholder="Paste the full page HTML source here..."
+                  rows={4}
+                  className="w-full rounded-xl border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-primary text-charcoal dark:text-white p-3 bg-white dark:bg-gray-900 text-xs font-mono resize-none mb-3"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleParseHtml}
+                    disabled={isImporting || !pastedHtml.trim()}
+                    className="px-4 h-10 bg-primary text-white font-bold rounded-lg hover:bg-emerald-600 disabled:opacity-50 transition-all flex items-center gap-2 text-sm"
+                  >
+                    {isImporting ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
+                    Parse & Import
+                  </button>
+                  <button
+                    onClick={() => { setShowHtmlPaste(false); setPastedHtml(''); setImportError(null); }}
+                    className="px-4 h-10 bg-gray-200 dark:bg-gray-700 text-charcoal dark:text-white font-bold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {importError && !showHtmlPaste && (
+              <p className="text-sm text-red-500 mt-2">{importError}</p>
+            )}
+            {importSuccess && (
+              <p className="text-sm text-emerald-500 mt-2 font-bold">Successfully imported! Review the details below.</p>
+            )}
+          </div>
+        )}
+
         {/* Tabs */}
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden mb-8 min-h-[600px]">
           <div className="flex border-b border-gray-200 dark:border-gray-700 px-6 gap-8 overflow-x-auto scrollbar-hide">

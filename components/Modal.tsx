@@ -4,6 +4,7 @@ interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirm?: () => void;
+  onCancel?: () => void; // Optional custom cancel handler
   title: string;
   message: string;
   confirmText?: string;
@@ -15,6 +16,7 @@ export const Modal: React.FC<ModalProps> = ({
   isOpen,
   onClose,
   onConfirm,
+  onCancel,
   title,
   message,
   confirmText = 'Confirm',
@@ -63,7 +65,18 @@ export const Modal: React.FC<ModalProps> = ({
         <div className="flex gap-4">
           {type === 'confirm' && (
             <button
-              onClick={onClose}
+              onClick={() => {
+                // Use custom onCancel handler if provided
+                if (onCancel) {
+                  onCancel();
+                } else if (cancelText?.includes('Card') || cancelText?.includes('card')) {
+                  // Fallback: navigate to dashboard (but prefer onCancel prop)
+                  window.location.href = '/dashboard';
+                } else {
+                  // For other cases (like "Logout Now"), just call onClose
+                  onClose();
+                }
+              }}
               className="flex-1 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-charcoal dark:text-white py-3 rounded-xl font-bold transition-all active:scale-95">
               {cancelText}
             </button>

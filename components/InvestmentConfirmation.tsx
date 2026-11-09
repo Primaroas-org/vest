@@ -1,12 +1,15 @@
 import React from 'react';
-import { Property } from '../types';
+import { Property, ViewState } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAuth } from '../contexts/AuthContext';
+import { downloadReceipt } from '../utils/receipt';
 
 interface InvestmentConfirmationProps {
   isOpen: boolean;
   onClose: () => void;
   onViewPortfolio: () => void;
   onBrowseProperties: () => void;
+  onNavigate?: (view: ViewState) => void;
   property: Property;
   investmentData?: {
     transaction_id?: string;
@@ -22,10 +25,12 @@ export const InvestmentConfirmation: React.FC<InvestmentConfirmationProps> = ({
   onClose,
   onViewPortfolio,
   onBrowseProperties,
+  onNavigate,
   property,
   investmentData
 }) => {
   const { dict } = useLanguage();
+  const { user } = useAuth();
 
   // Handle escape key to close modal and prevent body scroll
   React.useEffect(() => {
@@ -129,8 +134,8 @@ export const InvestmentConfirmation: React.FC<InvestmentConfirmationProps> = ({
               {dict.investmentConfirmation?.title || 'Investment Confirmed'}
             </h1>
             <p className="text-gray-600 dark:text-gray-400 text-sm max-w-sm mx-auto">
-              {dict.investmentConfirmation?.subtitle?.replace('{property}', property.title) || 
-               `You are now a shareholder in ${property.title}. Your transaction has been processed successfully.`}
+              {dict.investmentConfirmation?.subtitle?.replace('{property}', property.title) ||
+                `You are now a shareholder in ${property.title}. Your transaction has been processed successfully.`}
             </p>
           </div>
 
@@ -226,8 +231,19 @@ export const InvestmentConfirmation: React.FC<InvestmentConfirmationProps> = ({
           <div className="mt-4 flex items-center justify-center gap-4">
             <button
               onClick={() => {
-                // You could implement download receipt functionality here
-                console.log('Download receipt');
+                if (investmentData) {
+                  downloadReceipt({
+                    transactionId: investmentData.transaction_id || `#FR-${Date.now().toString().slice(-7)}`,
+                    propertyName: property.title,
+                    propertyLocation: property.location,
+                    date: formatDate(),
+                    shares: investmentData.shares,
+                    pricePerShare: investmentData.price_per_share,
+                    totalPaid: investmentData.total_cost,
+                    userEmail: user?.email,
+                    userName: user?.name
+                  });
+                }
               }}
               className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-primary transition-colors"
             >
@@ -237,8 +253,11 @@ export const InvestmentConfirmation: React.FC<InvestmentConfirmationProps> = ({
             <span className="text-gray-300 dark:text-gray-700">|</span>
             <button
               onClick={() => {
-                // You could implement help functionality here
-                console.log('Need help');
+                if (onNavigate) {
+                  onNavigate('contact');
+                } else {
+                  window.location.href = '/contact';
+                }
               }}
               className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-primary transition-colors"
             >

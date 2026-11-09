@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Search, Filter, MoreHorizontal, Mail, Phone } from 'lucide-react';
+import { cachedFetch, getCached } from '../../utils/apiCache';
 
 interface Investor {
   id: string;
@@ -29,28 +30,29 @@ const AdminInvestors: React.FC = () => {
   useEffect(() => {
     const fetchInvestors = async () => {
       try {
-        setLoading(true);
+        const cacheKey = `admin:investors:page${currentPage}`;
+        if (!getCached(cacheKey)) setLoading(true);
         const token = localStorage.getItem('access_token') || localStorage.getItem('supabase.auth.token');
-        const response = await fetch(`/api/admin/investors?page=${currentPage}&limit=${itemsPerPage}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+        const data = await cachedFetch(cacheKey, async () => {
+          const response = await fetch(`/api/admin/investors?page=${currentPage}&limit=${itemsPerPage}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          if (!response.ok) throw new Error('Failed to fetch investors');
+          return response.json();
         });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.data) {
-            const mappedInvestors: Investor[] = data.data.map((inv: any) => ({
-              id: inv.id,
-              name: inv.full_name || inv.email?.split('@')[0] || 'Unknown',
-              email: inv.email,
-              joined: new Date(inv.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-              invested: `₮${parseFloat(inv.total_invested || '0').toLocaleString()}`,
-              status: inv.kyc_status === 'verified' ? 'Active' : inv.kyc_status === 'rejected' ? 'Inactive' : 'Pending'
-            }));
-            setInvestors(mappedInvestors);
-            setTotalInvestors(data.pagination?.total || 0);
-          }
+        if (data.success && data.data) {
+          const mappedInvestors: Investor[] = data.data.map((inv: any) => ({
+            id: inv.id,
+            name: inv.full_name || inv.email?.split('@')[0] || 'Unknown',
+            email: inv.email,
+            joined: new Date(inv.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            invested: `₮${parseFloat(inv.total_invested || '0').toLocaleString()}`,
+            status: inv.kyc_status === 'verified' ? 'Active' : inv.kyc_status === 'rejected' ? 'Inactive' : 'Pending'
+          }));
+          setInvestors(mappedInvestors);
+          setTotalInvestors(data.pagination?.total || 0);
         }
       } catch (error) {
         console.error('Error fetching investors:', error);

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Search, CheckCircle, XCircle, Eye, Filter, X } from 'lucide-react';
+import { cachedFetch, getCached, invalidateCache } from '../../utils/apiCache';
 
 interface KYCSubmission {
   id: string;
@@ -15,8 +16,8 @@ interface KYCSubmission {
 }
 
 const AdminKYC: React.FC = () => {
-  const [submissions, setSubmissions] = useState<KYCSubmission[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [submissions, setSubmissions] = useState<KYCSubmission[]>(() => getCached('admin:kyc') || []);
+  const [loading, setLoading] = useState(!getCached('admin:kyc'));
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [viewingSubmission, setViewingSubmission] = useState<KYCSubmission | null>(null);
@@ -24,24 +25,19 @@ const AdminKYC: React.FC = () => {
   useEffect(() => {
     const fetchKYCs = async () => {
       try {
-        setLoading(true);
+        if (!getCached('admin:kyc')) setLoading(true);
         const token = localStorage.getItem('access_token') || localStorage.getItem('supabase.auth.token');
-        const response = await fetch('/api/admin/kyc', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.data) {
-            console.log('KYC submissions data:', data.data);
-            // Log first submission's kyc_data structure for debugging
-            if (data.data.length > 0) {
-              console.log('First submission kyc_data:', JSON.stringify(data.data[0].kyc_data, null, 2));
+        const data = await cachedFetch('admin:kyc', async () => {
+          const response = await fetch('/api/admin/kyc', {
+            headers: {
+              'Authorization': `Bearer ${token}`
             }
-            setSubmissions(data.data);
-          }
+          });
+          if (!response.ok) throw new Error('Failed to fetch KYC');
+          return response.json();
+        });
+        if (data.success && data.data) {
+          setSubmissions(data.data);
         }
       } catch (error) {
         console.error('Error fetching KYC submissions:', error);
@@ -301,126 +297,74 @@ const AdminKYC: React.FC = () => {
                   {viewingSubmission.kyc_status}
                 </span>
               </div>
-              {viewingSubmission.kyc_data && (
-                <div>
-                  <p className="text-sm font-bold text-gray-500 dark:text-gray-400 mb-2">Documents</p>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {(viewingSubmission.kyc_data.front_document || viewingSubmission.kyc_data.front_document_url) && (
-                      <div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Front Document</p>
-                        <div className="relative group">
-                          <img 
-                            src={viewingSubmission.kyc_data.front_document || viewingSubmission.kyc_data.front_document_url} 
-                            alt="Front document" 
-                            className="w-full h-48 object-cover rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90 transition-opacity"
-                            onClick={() => window.open(viewingSubmission.kyc_data.front_document || viewingSubmission.kyc_data.front_document_url, '_blank')}
-                            referrerPolicy="no-referrer"
-                            onError={(e) => {
-                              const img = e.target as HTMLImageElement;
-                              const url = viewingSubmission.kyc_data.front_document || viewingSubmission.kyc_data.front_document_url;
-                              console.error('Error loading front document:', url);
-                              // Show error message instead of hiding
-                              if (!img.parentElement?.querySelector('.error-fallback')) {
-                                img.style.display = 'none';
-                                const errorDiv = document.createElement('div');
-                                errorDiv.className = 'error-fallback w-full h-48 flex items-center justify-center bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg';
-                                errorDiv.innerHTML = `
-                                  <div class="text-center p-4">
-                                    <p class="text-xs text-red-600 dark:text-red-400 mb-2">Failed to load image</p>
-                                    <a href="${url}" target="_blank" class="text-xs text-primary hover:underline">Open in new tab</a>
-                                  </div>
-                                `;
-                                img.parentElement?.appendChild(errorDiv);
-                              }
-                            }}
-                          />
-                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-lg flex items-center justify-center">
-                            <Eye className="size-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+              {viewingSubmission.kyc_data && (() => {
+                // Resolve image URLs from all possible locations in kyc_data
+                const kd = viewingSubmission.kyc_data;
+                const progress = kd.progress || {};
+                const getDocUrl = (key: string) => {
+                  // Check: top-level url → top-level base64 → progress base64
+                  return kd[`${key}_url`] || kd[key] || progress[key] || null;
+                };
+                const frontSrc = getDocUrl('front_document');
+                const backSrc = getDocUrl('back_document');
+                const selfieSrc = getDocUrl('selfie');
+                const docs = [
+                  { label: 'Front Document', src: frontSrc },
+                  { label: 'Back Document', src: backSrc },
+                  { label: 'Selfie', src: selfieSrc },
+                ].filter(d => d.src);
+
+                return (
+                  <div>
+                    <p className="text-sm font-bold text-gray-500 dark:text-gray-400 mb-2">Documents</p>
+                    {docs.length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {docs.map(doc => (
+                          <div key={doc.label}>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{doc.label}</p>
+                            <div className="relative group">
+                              <img
+                                src={doc.src}
+                                alt={doc.label}
+                                className="w-full h-48 object-cover rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90 transition-opacity"
+                                crossOrigin="anonymous"
+                                referrerPolicy="no-referrer"
+                                onClick={() => window.open(doc.src, '_blank')}
+                                onError={(e) => {
+                                  const img = e.target as HTMLImageElement;
+                                  // If it's a Supabase URL, try adding token as query param
+                                  if (!img.dataset.retried && doc.src.includes('supabase')) {
+                                    img.dataset.retried = 'true';
+                                    const token = localStorage.getItem('supabase.auth.token');
+                                    if (token) {
+                                      img.src = `${doc.src}${doc.src.includes('?') ? '&' : '?'}token=${token}`;
+                                      return;
+                                    }
+                                  }
+                                  img.style.display = 'none';
+                                  if (!img.parentElement?.querySelector('.error-fallback')) {
+                                    const div = document.createElement('div');
+                                    div.className = 'error-fallback w-full h-48 flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg';
+                                    div.innerHTML = `<p class="text-xs text-gray-500 mb-2">Image requires storage access</p><a href="${doc.src}" target="_blank" class="text-xs text-emerald-500 hover:underline font-bold">Open in new tab</a>`;
+                                    img.parentElement?.appendChild(div);
+                                  }
+                                }}
+                              />
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-lg flex items-center justify-center pointer-events-none">
+                                <Eye className="size-6 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" />
+                              </div>
+                            </div>
                           </div>
-                        </div>
+                        ))}
                       </div>
-                    )}
-                    {(viewingSubmission.kyc_data.back_document || viewingSubmission.kyc_data.back_document_url) && (
-                      <div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Back Document</p>
-                        <div className="relative group">
-                          <img 
-                            src={viewingSubmission.kyc_data.back_document || viewingSubmission.kyc_data.back_document_url} 
-                            alt="Back document" 
-                            className="w-full h-48 object-cover rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90 transition-opacity"
-                            onClick={() => window.open(viewingSubmission.kyc_data.back_document || viewingSubmission.kyc_data.back_document_url, '_blank')}
-                            referrerPolicy="no-referrer"
-                            onError={(e) => {
-                              const img = e.target as HTMLImageElement;
-                              const url = viewingSubmission.kyc_data.back_document || viewingSubmission.kyc_data.back_document_url;
-                              console.error('Error loading back document:', url);
-                              if (!img.parentElement?.querySelector('.error-fallback')) {
-                                img.style.display = 'none';
-                                const errorDiv = document.createElement('div');
-                                errorDiv.className = 'error-fallback w-full h-48 flex items-center justify-center bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg';
-                                errorDiv.innerHTML = `
-                                  <div class="text-center p-4">
-                                    <p class="text-xs text-red-600 dark:text-red-400 mb-2">Failed to load image</p>
-                                    <a href="${url}" target="_blank" class="text-xs text-primary hover:underline">Open in new tab</a>
-                                  </div>
-                                `;
-                                img.parentElement?.appendChild(errorDiv);
-                              }
-                            }}
-                          />
-                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-lg flex items-center justify-center">
-                            <Eye className="size-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    {(viewingSubmission.kyc_data.selfie || viewingSubmission.kyc_data.selfie_url) && (
-                      <div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Selfie</p>
-                        <div className="relative group">
-                          <img 
-                            src={viewingSubmission.kyc_data.selfie || viewingSubmission.kyc_data.selfie_url} 
-                            alt="Selfie" 
-                            className="w-full h-48 object-cover rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90 transition-opacity"
-                            onClick={() => window.open(viewingSubmission.kyc_data.selfie || viewingSubmission.kyc_data.selfie_url, '_blank')}
-                            referrerPolicy="no-referrer"
-                            onError={(e) => {
-                              const img = e.target as HTMLImageElement;
-                              const url = viewingSubmission.kyc_data.selfie || viewingSubmission.kyc_data.selfie_url;
-                              console.error('Error loading selfie:', url);
-                              if (!img.parentElement?.querySelector('.error-fallback')) {
-                                img.style.display = 'none';
-                                const errorDiv = document.createElement('div');
-                                errorDiv.className = 'error-fallback w-full h-48 flex items-center justify-center bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg';
-                                errorDiv.innerHTML = `
-                                  <div class="text-center p-4">
-                                    <p class="text-xs text-red-600 dark:text-red-400 mb-2">Failed to load image</p>
-                                    <a href="${url}" target="_blank" class="text-xs text-primary hover:underline">Open in new tab</a>
-                                  </div>
-                                `;
-                                img.parentElement?.appendChild(errorDiv);
-                              }
-                            }}
-                          />
-                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-lg flex items-center justify-center">
-                            <Eye className="size-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    {!viewingSubmission.kyc_data.front_document && 
-                     !viewingSubmission.kyc_data.front_document_url &&
-                     !viewingSubmission.kyc_data.back_document && 
-                     !viewingSubmission.kyc_data.back_document_url &&
-                     !viewingSubmission.kyc_data.selfie && 
-                     !viewingSubmission.kyc_data.selfie_url && (
-                      <p className="text-sm text-gray-500 dark:text-gray-400 col-span-3 text-center py-4">
-                        No documents available
+                    ) : (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
+                        No documents available. Documents may have been submitted as progress data.
                       </p>
                     )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             {viewingSubmission.kyc_status === 'pending' && (

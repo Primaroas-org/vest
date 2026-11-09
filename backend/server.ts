@@ -843,11 +843,15 @@ app.get('/api/admin/investors', authenticate, requireAdmin, async (req: Request,
 app.get('/api/admin/transactions', authenticate, requireAdmin, async (req: Request, res: Response) => {
     try {
         const { db } = await import('./db/index.js');
-        const { transactions, properties, users } = await import('./db/schema.js');
-        const { desc } = await import('drizzle-orm');
-        const { limit = 100 } = req.query;
+        const { transactions, properties, users, transactionTypeEnum } = await import('./db/schema.js');
+        const { desc, eq: eqOp } = await import('drizzle-orm');
+        const { limit = 100, type } = req.query;
+
+        // Only filter by a real transaction type; an unknown ?type= is ignored
+        const typeFilter = transactionTypeEnum.enumValues.find((t) => t === type);
 
         const data = await db.query.transactions.findMany({
+            where: typeFilter ? eqOp(transactions.transactionType, typeFilter) : undefined,
             with: {
                 property: {
                     columns: {
@@ -905,6 +909,356 @@ app.get('/api/admin/properties', authenticate, requireAdmin, async (req: Request
 
 // Distribute rental income
 app.post('/api/admin/distribute-rent', authenticate, requireAdmin, distributeRent);
+
+// Scrape listing from unegui.mn
+app.post('/api/admin/scrape-listing', authenticate, requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { url } = req.body;
+        if (!url || typeof url !== 'string') {
+            res.status(400).json({ success: false, error: 'URL is required' });
+            return;
+        }
+
+        // Only fetch real unegui.mn pages. Checking the parsed hostname (not a substring of the
+        // whole URL) stops the server from being pointed at arbitrary hosts.
+        let parsedUrl: URL;
+        try {
+            parsedUrl = new URL(url);
+        } catch {
+            res.status(400).json({ success: false, error: 'Invalid URL' });
+            return;
+        }
+        const host = parsedUrl.hostname.toLowerCase();
+        if (parsedUrl.protocol !== 'https:' || (host !== 'unegui.mn' && !host.endsWith('.unegui.mn'))) {
+            res.status(400).json({ success: false, error: 'Only https://unegui.mn URLs are supported' });
+            return;
+        }
+
+        // One plain request. If the site blocks it, the admin pastes the page HTML instead
+        // (handled by /api/admin/parse-listing-html), so we never try to get around the block.
+        let html = '';
+        try {
+            const response = await fetch(parsedUrl, {
+                headers: {
+                    'Accept': 'text/html,application/xhtml+xml',
+                    'Accept-Language': 'mn-MN,mn;q=0.9,en;q=0.8',
+                },
+                redirect: 'follow',
+            });
+            if (response.ok) {
+                html = await response.text();
+            } else {
+                console.log(`[Listing import] Fetch returned status ${response.status}`);
+            }
+        } catch (fetchErr) {
+            console.log(`[Listing import] Fetch error: ${(fetchErr as Error).message}`);
+        }
+
+        if (!html) {
+            res.status(400).json({
+                success: false,
+                error: 'unegui.mn did not allow the page to be fetched. Please use the manual import option below.'
+            });
+            return;
+        }
+
+        // Extract title - multiple strategies
+        let title = '';
+        const titlePatterns = [
+            /<h1[^>]*>([\s\S]*?)<\/h1>/i,
+            /<meta[^>]*property="og:title"[^>]*content="([^"]+)"/i,
+            /<meta[^>]*content="([^"]+)"[^>]*property="og:title"/i,
+            /<title[^>]*>([\s\S]*?)<\/title>/i,
+        ];
+        for (const pat of titlePatterns) {
+            const m = html.match(pat);
+            if (m && m[1]) {
+                title = m[1].replace(/<[^>]+>/g, '').trim();
+                title = title.replace(/\s*[-|–—].*unegui\.mn.*/i, '').trim();
+                title = title.replace(/\s*[-|–—]\s*Unegui\.mn.*/i, '').trim();
+                if (title.length > 3) break;
+            }
+        }
+
+        // Extract price - multiple patterns
+        let price = '';
+        const pricePatterns = [
+            /data-price="(\d+)"/,
+            /"price"\s*:\s*"?(\d[\d,.]*)"?/,
+            /class="[^"]*price[^"]*"[^>]*>([\s\S]*?)</i,
+            /(\d[\d\s,.]+)\s*₮/,
+            /(\d[\d\s,.]+)\s*сая/i,
+        ];
+        for (const pat of pricePatterns) {
+            const m = html.match(pat);
+            if (m && m[1]) {
+                let rawPrice = m[1].replace(/<[^>]+>/g, '').replace(/\s/g, '').replace(/,/g, '');
+                // Handle "сая" (million)
+                if (pat.source.includes('сая') && rawPrice) {
+                    const num = parseFloat(rawPrice);
+                    if (!isNaN(num)) rawPrice = String(num * 1000000);
+                }
+                if (rawPrice && /^\d+(\.\d+)?$/.test(rawPrice)) {
+                    price = rawPrice;
+                    break;
+                }
+            }
+        }
+
+        // Extract description
+        let description = '';
+        const descPatterns = [
+            /<div[^>]*class="[^"]*js-description[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+            /<div[^>]*class="[^"]*description[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+            /<meta[^>]*property="og:description"[^>]*content="([^"]+)"/i,
+            /<meta[^>]*content="([^"]+)"[^>]*property="og:description"/i,
+            /<meta[^>]*name="description"[^>]*content="([^"]+)"/i,
+        ];
+        for (const pat of descPatterns) {
+            const m = html.match(pat);
+            if (m && m[1]) {
+                description = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                if (description.length > 10) break;
+            }
+        }
+
+        // Extract location
+        let location = '';
+        const locPatterns = [
+            /Байршил[^:]*:\s*([^<\n]+)/i,
+            /Дүүрэг[^:]*:\s*([^<\n]+)/i,
+            /Хаяг[^:]*:\s*([^<\n]+)/i,
+            /<span[^>]*class="[^"]*address[^"]*"[^>]*>([\s\S]*?)<\/span>/i,
+            /<div[^>]*class="[^"]*address[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+            // Try extracting from breadcrumbs
+            /Улаанбаатар[^<]*/i,
+        ];
+        for (const pat of locPatterns) {
+            const m = html.match(pat);
+            if (m) {
+                const loc = (m[1] || m[0]).replace(/<[^>]+>/g, '').trim();
+                if (loc.length > 3 && loc.length < 200) {
+                    location = loc;
+                    break;
+                }
+            }
+        }
+
+        // Extract images - comprehensive patterns for unegui.mn
+        const images: string[] = [];
+        const imgPatterns = [
+            /data-full="([^"]+)"/g,
+            /data-zoom-image="([^"]+)"/g,
+            /"big"\s*:\s*"([^"]+)"/g,
+            /"original"\s*:\s*"([^"]+)"/g,
+            /src="(https?:\/\/[^"]*unegui[^"]*\/original\/[^"]+)"/g,
+            /src="(https?:\/\/[^"]*unegui[^"]*\/big\/[^"]+)"/g,
+            /href="(https?:\/\/[^"]*unegui[^"]*\/original\/[^"]+)"/g,
+            // CDN image patterns
+            /src="(https?:\/\/[^"]*cdn[^"]*unegui[^"]*\.(jpg|jpeg|png|webp)[^"]*)"/gi,
+            /(https?:\/\/[a-z0-9.-]*unegui\.mn\/[^"'\s]*\.(jpg|jpeg|png|webp))/gi,
+        ];
+        for (const pattern of imgPatterns) {
+            let match;
+            while ((match = pattern.exec(html)) !== null) {
+                let imgUrl = match[1].replace(/\\\//g, '/');
+                // Ensure proper URL
+                if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
+                if (!images.includes(imgUrl) && imgUrl.startsWith('http') && !imgUrl.includes('logo') && !imgUrl.includes('favicon')) {
+                    images.push(imgUrl);
+                }
+            }
+        }
+
+        // Also extract from og:image meta tags
+        const ogPatterns = [
+            /property="og:image"[^>]*content="([^"]+)"/g,
+            /content="([^"]+)"[^>]*property="og:image"/g,
+        ];
+        for (const pattern of ogPatterns) {
+            let match;
+            while ((match = pattern.exec(html)) !== null) {
+                let imgUrl = match[1].replace(/\\\//g, '/');
+                if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
+                if (!images.includes(imgUrl) && imgUrl.startsWith('http')) {
+                    images.push(imgUrl);
+                }
+            }
+        }
+
+        // Extract additional property details (area, rooms, floor, etc.)
+        let details: Record<string, string> = {};
+        const detailPatterns = [
+            { key: 'area', pattern: /(\d+[\d.]*)\s*м²/i },
+            { key: 'rooms', pattern: /(\d+)\s*өрөө/i },
+            { key: 'floor', pattern: /(\d+)\s*давхар/i },
+        ];
+        for (const { key, pattern } of detailPatterns) {
+            const m = html.match(pattern);
+            if (m && m[1]) details[key] = m[1];
+        }
+
+        console.log(`[Scraper] Extracted: title="${title}", price="${price}", images=${images.length}, location="${location}"`);
+
+        res.json({
+            success: true,
+            data: {
+                title,
+                price,
+                description,
+                location,
+                images: images.slice(0, 20),
+                details,
+                source_url: url,
+            }
+        });
+    } catch (error: any) {
+        console.error('Scraping error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to scrape listing' });
+    }
+});
+
+// Parse listing HTML from unegui.mn (when direct scrape is blocked by Cloudflare)
+app.post('/api/admin/parse-listing-html', authenticate, requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { html, source_url } = req.body;
+        if (!html || typeof html !== 'string') {
+            res.status(400).json({ success: false, error: 'HTML content is required' });
+            return;
+        }
+
+        if (html.length < 100) {
+            res.status(400).json({ success: false, error: 'HTML content too short - make sure you copied the full page source' });
+            return;
+        }
+
+        // Extract title
+        let title = '';
+        const titlePatterns = [
+            /<h1[^>]*>([\s\S]*?)<\/h1>/i,
+            /<meta[^>]*property="og:title"[^>]*content="([^"]+)"/i,
+            /<meta[^>]*content="([^"]+)"[^>]*property="og:title"/i,
+            /<title[^>]*>([\s\S]*?)<\/title>/i,
+        ];
+        for (const pat of titlePatterns) {
+            const m = html.match(pat);
+            if (m && m[1]) {
+                title = m[1].replace(/<[^>]+>/g, '').trim();
+                title = title.replace(/\s*[-|–—].*unegui\.mn.*/i, '').trim();
+                if (title.length > 3) break;
+            }
+        }
+
+        // Extract price
+        let price = '';
+        const pricePatterns = [
+            /data-price="(\d+)"/,
+            /"price"\s*:\s*"?(\d[\d,.]*)"?/,
+            /class="[^"]*price[^"]*"[^>]*>([\s\S]*?)</i,
+            /(\d[\d\s,.]+)\s*₮/,
+            /(\d[\d\s,.]+)\s*сая/i,
+        ];
+        for (const pat of pricePatterns) {
+            const m = html.match(pat);
+            if (m && m[1]) {
+                let rawPrice = m[1].replace(/<[^>]+>/g, '').replace(/\s/g, '').replace(/,/g, '');
+                if (pat.source.includes('сая') && rawPrice) {
+                    const num = parseFloat(rawPrice);
+                    if (!isNaN(num)) rawPrice = String(num * 1000000);
+                }
+                if (rawPrice && /^\d+(\.\d+)?$/.test(rawPrice)) {
+                    price = rawPrice;
+                    break;
+                }
+            }
+        }
+
+        // Extract description
+        let description = '';
+        const descPatterns = [
+            /<div[^>]*class="[^"]*js-description[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+            /<div[^>]*class="[^"]*description[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+            /<meta[^>]*property="og:description"[^>]*content="([^"]+)"/i,
+            /<meta[^>]*name="description"[^>]*content="([^"]+)"/i,
+        ];
+        for (const pat of descPatterns) {
+            const m = html.match(pat);
+            if (m && m[1]) {
+                description = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                if (description.length > 10) break;
+            }
+        }
+
+        // Extract location
+        let location = '';
+        const locPatterns = [
+            /Байршил[^:]*:\s*([^<\n]+)/i,
+            /Дүүрэг[^:]*:\s*([^<\n]+)/i,
+            /Хаяг[^:]*:\s*([^<\n]+)/i,
+            /<span[^>]*class="[^"]*address[^"]*"[^>]*>([\s\S]*?)<\/span>/i,
+        ];
+        for (const pat of locPatterns) {
+            const m = html.match(pat);
+            if (m) {
+                const loc = (m[1] || m[0]).replace(/<[^>]+>/g, '').trim();
+                if (loc.length > 3 && loc.length < 200) { location = loc; break; }
+            }
+        }
+
+        // Extract images
+        const images: string[] = [];
+        const imgPatterns = [
+            /data-full="([^"]+)"/g,
+            /data-zoom-image="([^"]+)"/g,
+            /"big"\s*:\s*"([^"]+)"/g,
+            /"original"\s*:\s*"([^"]+)"/g,
+            /src="(https?:\/\/[^"]*unegui[^"]*\/original\/[^"]+)"/g,
+            /src="(https?:\/\/[^"]*unegui[^"]*\/big\/[^"]+)"/g,
+            /(https?:\/\/[a-z0-9.-]*unegui\.mn\/[^"'\s]*\.(jpg|jpeg|png|webp))/gi,
+        ];
+        for (const pattern of imgPatterns) {
+            let match;
+            while ((match = pattern.exec(html)) !== null) {
+                let imgUrl = match[1].replace(/\\\//g, '/');
+                if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
+                if (!images.includes(imgUrl) && imgUrl.startsWith('http') && !imgUrl.includes('logo') && !imgUrl.includes('favicon')) {
+                    images.push(imgUrl);
+                }
+            }
+        }
+
+        // og:image
+        const ogPatterns = [
+            /property="og:image"[^>]*content="([^"]+)"/g,
+            /content="([^"]+)"[^>]*property="og:image"/g,
+        ];
+        for (const pattern of ogPatterns) {
+            let match;
+            while ((match = pattern.exec(html)) !== null) {
+                let imgUrl = match[1];
+                if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
+                if (!images.includes(imgUrl) && imgUrl.startsWith('http')) images.push(imgUrl);
+            }
+        }
+
+        console.log(`[Parser] Extracted: title="${title}", price="${price}", images=${images.length}, location="${location}"`);
+
+        res.json({
+            success: true,
+            data: {
+                title,
+                price,
+                description,
+                location,
+                images: images.slice(0, 20),
+                source_url: source_url || '',
+            }
+        });
+    } catch (error: any) {
+        console.error('HTML parsing error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to parse HTML' });
+    }
+});
 
 // Create new property (admin only)
 app.post('/api/admin/properties', authenticate, requireAdmin, async (req: Request, res: Response) => {

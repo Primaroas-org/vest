@@ -8,6 +8,7 @@ import AdminProperties from './AdminProperties';
 import AdminInvestors from './AdminInvestors';
 import AdminTransactions from './AdminTransactions';
 import AdminKYC from './AdminKYC';
+import AdminDividends from './AdminDividends';
 import PropertyForm from './PropertyForm';
 
 const AdminPortal: React.FC = () => {
@@ -24,6 +25,7 @@ const AdminPortal: React.FC = () => {
     if (path.includes('/investors')) return 'investors';
     if (path.includes('/transactions')) return 'transactions';
     if (path.includes('/kyc')) return 'kyc';
+    if (path.includes('/dividends')) return 'dividends';
     return 'dashboard';
   };
   
@@ -129,6 +131,7 @@ const AdminPortal: React.FC = () => {
           <Route path="investors" element={<AdminInvestors />} />
           <Route path="transactions" element={<AdminTransactions />} />
           <Route path="kyc" element={<AdminKYC />} />
+          <Route path="dividends" element={<AdminDividends />} />
         </Routes>
       </main>
     </div>

@@ -17,6 +17,7 @@ const AdminHeader: React.FC<AdminHeaderProps> = ({ currentView, onNavigate }) =>
     { id: 'investors', label: 'Investors', path: '/admin/investors' },
     { id: 'transactions', label: 'Transactions', path: '/admin/transactions' },
     { id: 'kyc', label: 'KYC', path: '/admin/kyc' },
+    { id: 'dividends', label: 'Dividends', path: '/admin/dividends' },
   ];
   
   const getCurrentView = () => {
