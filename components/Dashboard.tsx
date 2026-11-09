@@ -984,7 +984,8 @@ const WalletView: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [showAddCardModal, setShowAddCardModal] = useState(false);
     const [error, setError] = useState('');
-    const [cards, setCards] = useState<any[]>(() => getCached('dashboard:cards') || []);
+    // The cache holds the whole API response ({ success, data }), so read .data
+    const [cards, setCards] = useState<any[]>(() => getCached<{ data?: any[] }>('dashboard:cards')?.data || []);
     const [cardsLoading, setCardsLoading] = useState(!getCached('dashboard:cards'));
     const [cardForm, setCardForm] = useState({
         bank_name: '',

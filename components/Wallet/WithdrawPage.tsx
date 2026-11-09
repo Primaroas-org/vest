@@ -11,7 +11,7 @@ const WithdrawPage: React.FC = () => {
     const [amount, setAmount] = useState('');
     const [transferMethod, setTransferMethod] = useState<'bank' | 'qpay'>('bank');
     const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
-    const [cards, setCards] = useState<any[]>(() => getCached('dashboard:cards')?.data || []);
+    const [cards, setCards] = useState<any[]>(() => getCached<{ data?: any[] }>('dashboard:cards')?.data || []);
     const [cardsLoading, setCardsLoading] = useState(!getCached('dashboard:cards'));
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');

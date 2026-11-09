@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, boolean, numeric, integer, jsonb, pgEnum, index, unique } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, boolean, numeric, integer, jsonb, pgEnum, index, unique, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // Enums
@@ -132,8 +132,9 @@ export const transactions = pgTable('transactions', {
     // Metadata
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     
-    // Reference to related transaction
-    relatedTransactionId: uuid('related_transaction_id').references(() => transactions.id),
+    // Reference to related transaction (self-reference: the AnyPgColumn annotation
+    // breaks the circular type, otherwise TypeScript infers `any` for the whole table)
+    relatedTransactionId: uuid('related_transaction_id').references((): AnyPgColumn => transactions.id),
 }, (table) => ({
     userIdIdx: index('idx_transactions_user_id').on(table.userId),
     propertyIdIdx: index('idx_transactions_property_id').on(table.propertyId),

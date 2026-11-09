@@ -843,12 +843,15 @@ app.get('/api/admin/investors', authenticate, requireAdmin, async (req: Request,
 app.get('/api/admin/transactions', authenticate, requireAdmin, async (req: Request, res: Response) => {
     try {
         const { db } = await import('./db/index.js');
-        const { transactions, properties, users } = await import('./db/schema.js');
+        const { transactions, properties, users, transactionTypeEnum } = await import('./db/schema.js');
         const { desc, eq: eqOp } = await import('drizzle-orm');
         const { limit = 100, type } = req.query;
 
+        // Only filter by a real transaction type; an unknown ?type= is ignored
+        const typeFilter = transactionTypeEnum.enumValues.find((t) => t === type);
+
         const data = await db.query.transactions.findMany({
-            where: type ? eqOp(transactions.transactionType, String(type)) : undefined,
+            where: typeFilter ? eqOp(transactions.transactionType, typeFilter) : undefined,
             with: {
                 property: {
                     columns: {

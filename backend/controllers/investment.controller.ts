@@ -86,7 +86,7 @@ export async function invest(req: any, res: any): Promise<void> {
             total_shares: dbProperty.totalShares,
             available_shares: dbProperty.availableShares,
             expected_annual_yield: dbProperty.expectedAnnualYield || undefined,
-            monthly_rent: dbProperty.monthlyRent,
+            monthly_rent: dbProperty.monthlyRent ?? '0.00', // column is nullable in schema.sql
             images: (dbProperty.images as any) || [],
             documents: (dbProperty.documents as any) || [],
             status: dbProperty.status as any,

@@ -28,7 +28,7 @@ const StatCard = ({ title, value, change, icon: Icon, color }: any) => (
 );
 
 const AdminDashboard: React.FC = () => {
-  const [stats, setStats] = useState<AdminStats | null>(() => getCached('admin:stats')?.data || null);
+  const [stats, setStats] = useState<AdminStats | null>(() => getCached<{ data?: AdminStats }>('admin:stats')?.data || null);
   const [loading, setLoading] = useState(!getCached('admin:stats'));
   const [recentActivity, setRecentActivity] = useState<any[]>(() => getCached('admin:recent-activity') || []);
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { CloudUpload, Sparkles, Eye, Trash2, Plus, FileText, Download, Save, X, Link, Loader2 } from 'lucide-react';
-import { PropertyData, AssetType } from './types';
+import { PropertyData, AssetType, PropertyImage } from './types';
 
 interface PropertyFormProps {
   propertyId?: string;
